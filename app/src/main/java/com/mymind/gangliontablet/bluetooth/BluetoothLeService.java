@@ -15,7 +15,6 @@
  */
 
 package com.mymind.gangliontablet.bluetooth;
-
 import android.app.Service;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
@@ -36,15 +35,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
 
-import static com.mymind.gangliontablet.bluetooth.SampleGattAttributes.UUID_GANGLION_RECEIVE;
-import static com.mymind.gangliontablet.bluetooth.SampleGattAttributes.UUID_GANGLION_SEND;
-
 /**
  * Service for managing connection and data communication with a GATT server hosted on a
  * given Bluetooth LE device.
  */
 public class BluetoothLeService extends Service {
-    private final static String TAG = "OpenBCIBLE/"+BluetoothLeService.class.getSimpleName();
+    private final static String TAG = "Ganglion"+BluetoothLeService.class.getSimpleName();
 
 
     private BluetoothManager mBluetoothManager;
@@ -149,7 +145,6 @@ public class BluetoothLeService extends Service {
     private void broadcastUpdate(final String action,
                                  final BluetoothGattCharacteristic characteristic) {
         final Intent intent = new Intent(action);
-         //Log.d(TAG, "UUID: " + characteristic.getUuid());
 
         if (UUID_GANGLION_RECEIVE.equals(characteristic.getUuid())) {
             final byte[] data = characteristic.getValue();
@@ -160,25 +155,19 @@ public class BluetoothLeService extends Service {
                     intent.putExtra(DATA_TYPE, "RAW");
                     intent.putExtra(FULL_DATA_1, fullData[0]);
                     intent.putExtra(SAMPLE_ID, sample_id);
-                   // Log.d(TAG,"SampleID" + sample_id[0]);
+                    // Log.d(TAG,"SampleID" + sample_id[0]);
                 } else if (packetID >=101 && packetID <= 200){
                     intent.putExtra(DATA_TYPE, "19BIT");
                     intent.putExtra(FULL_DATA_1, fullData[0]);
                     intent.putExtra(FULL_DATA_2, fullData[1]);
                     intent.putExtra(SAMPLE_ID, sample_id);
-                  //  Log.d(TAG,"SampleID1 " + sample_id[0] + "\n" + "SampleID1 " + sample_id[1]);
+                    //  Log.d(TAG,"SampleID1 " + sample_id[0] + "\n" + "SampleID1 " + sample_id[1]);
                 } else {
                     intent.putExtra(DATA_TYPE, "INVALID");
                 }
-
-                //for testing
-                // String payload = bytesToHex(data);
-                //Log.d(TAG, "Data as Hex: " + payload);
-
             }
         } else {
-            //TODO Handle the type of data here Channel, timestamp etc
-            // For all other profiles, writes the data formatted in HEX.
+            // Handle other characteristics here
 
         }
         sendBroadcast(intent);
@@ -193,25 +182,26 @@ public class BluetoothLeService extends Service {
         } else {
             packetID = data[0];
         }
-
+        Log.wtf(TAG," PacketID " + data[0]);
         //Copy the data without the packetID to payload
         byte[] payload= Arrays.copyOfRange(data, 1, data.length);
-        //Boolean receiving_ASCII;
+       //Boolean receiving_ASCII;
         if (packetID == 0) {
             //receiving_ASCII = false;
             parseRaw(packetID, payload);
             // 18-bit compression with Acceleromete
         } else if (packetID >= 1 && packetID <= 100){
             //receiving_ASCII = false;
-           //parse18bit(packetID, unpac[1:])
+            //parse18bit(packetID, unpac[1:])
             //19-bit compression without Accelerometer
         } else if(packetID >=101 && packetID <= 200){
             //receiving_ASCII = false;
             //packetID-100 for sampleID calculation
+            // parse19bit(packetID-100, test);
             parse19bit(packetID-100, payload);
             //Impedance Channel
         } else if (packetID >= 201 && packetID <= 205){
-           // receiving_ASCII = false;
+            // receiving_ASCII = false;
             //TODO parseImpedance(packetID, packet[1:])
             //Part of ASCII -- TODO: better formatting of incoming ASCII
         } else if( packetID == 206){
@@ -224,21 +214,21 @@ public class BluetoothLeService extends Service {
             // print ("$$$")
             //receiving_ASCII = false;
         } else{
-          //  print("Warning: unknown type of packet: " + str(packetID))
+            //  print("Warning: unknown type of packet: " + str(packetID))
             return false;
         }
         return true;
     }
 
     private static void parseRaw(int packetID, byte[] payload){
-       //Dealing with "Raw uncompressed" - 24 Bit
+        //Dealing with "Raw uncompressed" - 24 Bit
         if (payload.length != 19){
-            Log.e(TAG, "Wrong size, for 19-bit compression data " + payload.length + " instead of 19 bytes");
+            Log.e(TAG, "Wrong size, for Raw data " + payload.length + " instead of 19 bytes");
             return;
         }
+
         // 4 channels of 24bits - 4*3=12 Bytes of 19 Bytes used
         //Take values one by one
-
         for(int i=0;  i<12;  i=i+3){
             lastChannelData[i/3]=conv24bitsToInt(Arrays.copyOfRange(payload, i, i+3));
             fullData[0][i/3]=lastChannelData[i/3];
@@ -273,7 +263,6 @@ public class BluetoothLeService extends Service {
             updatePacketsCount(packetID);
 
         }
-
     }
 
     private static void updatePacketsCount(int packetID){
@@ -283,7 +272,7 @@ public class BluetoothLeService extends Service {
             packets_dropped  = 0;
             return;
         }
-         // ID loops every 101 packets
+        // ID loops every 101 packets
         if (packetID > last_id){
             packets_dropped = packetID - last_id - 1;
         } else{
@@ -291,7 +280,7 @@ public class BluetoothLeService extends Service {
         }
         last_id = packetID;
         //if (packets_dropped > 0)
-          //  Log.e(TAG, "Warning: dropped " + packets_dropped + " packets.");
+        //  Log.e(TAG, "Warning: dropped " + packets_dropped + " packets.");
     }
 
     private static int[][] decompressDeltas19Bit(byte[] payload){
@@ -305,69 +294,70 @@ public class BluetoothLeService extends Service {
         }
 
         int[][] receivedDeltas= {{0, 0, 0, 0},
-                                    {0, 0, 0, 0}};
+                {0, 0, 0, 0}};
 
         //Sample 1 - Channel 1
         int[] miniBuf = {
-                (payload[0] >> 5),
-                ((payload[0] & 0x1F) << 3 & 0xFF) | (payload[1] >> 5),
-                ((payload[1] & 0x1F) << 3 & 0xFF) | (payload[2] >> 5)
+                ( (payload[0] & 0xFF) >>> 5),
+                (((payload[0] & 0x1F) << 3) & 0xFF) | ( (payload[1] & 0xFF) >>> 5),
+                (((payload[1] & 0x1F) << 3) & 0xFF) | ( (payload[2] & 0xFF) >>> 5)
         };
         receivedDeltas[0][0] = conv19bitToInt32( miniBuf);
 
         //Sample 1 - Channel 2
         miniBuf = new int[]{
-        (payload[2] & 0x1F) >> 2,
-                (payload[2] << 6 & 0xFF) | (payload[3] >> 2),
-                (payload[3] << 6 & 0xFF) | (payload[4] >> 2)
+                (payload[2] & 0x1F) >>> 2,
+                (payload[2] << 6 & 0xFF) | ( (payload[3] & 0xFF) >>> 2),
+                (payload[3] << 6 & 0xFF) | ( (payload[4] & 0xFF) >>> 2)
         };
+
         receivedDeltas[0][1] = conv19bitToInt32(miniBuf);
 
         //Sample 1 - Channel 3
         miniBuf = new int[]{
-                ((payload[4] & 0x03) << 1 & 0xFF) | (payload[5] >> 7),
-                ((payload[5] & 0x7F) << 1 & 0xFF) | (payload[6] >> 7),
-                ((payload[6] & 0x7F) << 1 & 0xFF) | (payload[7] >> 7)
+                ((payload[4] & 0x03) << 1 & 0xFF) | ( (payload[5] & 0xFF) >>> 7),
+                ((payload[5] & 0x7F) << 1 & 0xFF) | ( (payload[6] & 0xFF) >>> 7),
+                ((payload[6] & 0x7F) << 1 & 0xFF) | ( (payload[7] & 0xFF) >>> 7)
         };
         receivedDeltas[0][2] = conv19bitToInt32(miniBuf);
 
         //Sample 1 - Channel 4
         miniBuf = new int[]{
-                ((payload[7] & 0x7F) >> 4),
-                ((payload[7] & 0x0F) << 4 & 0xFF) | (payload[8] >> 4),
-                ((payload[8] & 0x0F) << 4 & 0xFF) | (payload[9] >> 4)
+                ((payload[7] & 0x7F) >>> 4),
+                ((payload[7] & 0x0F) << 4 & 0xFF) | ( (payload[8] & 0xFF) >>> 4),
+                ((payload[8] & 0x0F) << 4 & 0xFF) | ( (payload[9] & 0xFF) >>> 4)
         };
         receivedDeltas[0][3] = conv19bitToInt32(miniBuf);
 
         //Sample 2 - Channel 1
         miniBuf = new int[]{
-                ((payload[9] & 0x0F) >> 1),
-                (payload[9] << 7 & 0xFF) | (payload[10] >> 1),
-                (payload[10] << 7 & 0xFF) | (payload[11] >> 1)
+                ((payload[9] & 0x0F) >>> 1),
+                (payload[9] << 7 & 0xFF) | ( (payload[10] & 0xFF) >>> 1),
+                (payload[10] << 7 & 0xFF) | ( (payload[11] & 0xFF) >>> 1)
         };
         receivedDeltas[1][0] = conv19bitToInt32(miniBuf);
 
         //Sample 2 - Channel 2
         miniBuf = new int[]{
-                ((payload[11] & 0x01) << 2 & 0xFF) | (payload[12] >> 6),
-                (payload[12] << 2 & 0xFF) | (payload[13] >> 6),
-                (payload[13] << 2 & 0xFF) | (payload[14] >> 6)
+                ((payload[11] & 0x01) << 2 & 0xFF) | ( (payload[12] & 0xFF) >>> 6),
+                (payload[12] << 2 & 0xFF) | ( (payload[13] & 0xFF) >>> 6),
+                (payload[13] << 2 & 0xFF) | ( (payload[14] & 0xFF) >>> 6)
         };
         receivedDeltas[1][1] = conv19bitToInt32(miniBuf);
 
         // Sample 2 - Channel 3
         miniBuf = new int[]{
-                ((payload[14] & 0x38) >> 3),
-                ((payload[14] & 0x07) << 5 & 0xFF) | ((payload[15] & 0xF8) >> 3),
-                ((payload[15] & 0x07) << 5 & 0xFF) | ((payload[16] & 0xF8) >> 3)
+                ((payload[14] & 0x38) >>> 3),
+                ((payload[14] & 0x07) << 5 & 0xFF) | ((payload[15] & 0xF8) >>> 3),
+                ((payload[15] & 0x07) << 5 & 0xFF) | ((payload[16] & 0xF8) >>> 3)
         };
         receivedDeltas[1][2] = conv19bitToInt32(miniBuf);
 
         // Sample 2 - Channel 4
         miniBuf = new int[]{
                 (payload[16] & 0x07),
-                payload[17],
-                payload[18]};
+                (payload[17] & 0xFF),
+                (payload[18] & 0xFF)};
         receivedDeltas[1][3] = conv19bitToInt32(miniBuf);
 
         return receivedDeltas;
@@ -379,37 +369,36 @@ public class BluetoothLeService extends Service {
             Log.e(TAG, "Input should be 3 bytes long.");
             return -1;
         }
-        int prefix = 0;
+        int prefix = 0b0000000000000;
         //if LSB is 1, negative number, some hasty unsigned to signed conversion to do
         if ((threeByteBuffer[2] & 0x01 ) > 0) {
             prefix = 0b1111111111111;
-            return (((prefix << 19) | (threeByteBuffer[0] << 16) | (threeByteBuffer[1] << 8) | threeByteBuffer[2]));
+            return ((prefix << 19) | (threeByteBuffer[0] << 16) | (threeByteBuffer[1] << 8) | threeByteBuffer[2]);
         } else {
-            return (prefix << 19) | (threeByteBuffer[0] << 16) | (threeByteBuffer[1] << 8) | threeByteBuffer[2];
+            return ((prefix << 19) | (threeByteBuffer[0] << 16) | (threeByteBuffer[1] << 8) | threeByteBuffer[2]);
         }
     }
 
-    //TODO possible error source, since byte representation is different in java and python
-    private static int conv24bitsToInt(byte[] unpacked){
+    private static int conv24bitsToInt(byte[] byteArray){
         //Convert 24bit data coded on 3 bytes to a proper integer """
-        if (unpacked.length != 3){
+        if (byteArray.length != 3){
             // Log.e(TAG, "Input should be 3 bytes long.");
             return -1;
         }
 
-        return (  (unpacked[0] & 0xFF) << 16) | ((unpacked[1] & 0xFF) << 8) | (unpacked[2] & 0xFF);
+        int newInt = (((0xFF & byteArray[0]) << 16) | ((0xFF & byteArray[1]) << 8) | (0xFF & byteArray[2])
+        );
+
+        //If the MSB is 1 then the number is negative - fill up with 1s
+        if ((newInt & 0x00800000) > 0) {
+            newInt |= 0xFF000000;
+        } else {
+            newInt &= 0x00FFFFFF;
+        }
+
+        return newInt;
     }
 
-    //used for testing, convert byte array to hex string
-    public static String bytesToHex(byte[] bytes) {
-        char[] hexChars = new char[bytes.length * 2];
-        for ( int j = 0; j < bytes.length; j++ ) {
-            int v = bytes[j] & 0xFF;
-            hexChars[j * 2] = hexArray[v >>> 4];
-            hexChars[j * 2 + 1] = hexArray[v & 0x0F];
-        }
-        return new String(hexChars);
-    }
 
     /**
      * END OF CUSTOM METHODS**************************************************************************
@@ -418,7 +407,7 @@ public class BluetoothLeService extends Service {
      */
 
     public class LocalBinder extends Binder {
-        BluetoothLeService getService() {
+        public BluetoothLeService getService() {
             return BluetoothLeService.this;
         }
     }
