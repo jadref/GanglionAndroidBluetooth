@@ -22,6 +22,7 @@
 //package com.example.android.openbciBLE;
 package com.mymind.gangliontablet.bluetooth;
 
+import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattService;
@@ -31,9 +32,11 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.ServiceConnection;
+import android.content.pm.PackageManager;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.IBinder;
+import android.support.v4.app.ActivityCompat;
 import android.util.Log;
 import android.view.View;
 import android.widget.Button;
@@ -57,21 +60,20 @@ import com.mymind.gangliontablet.R;
  * communicates with {@code BluetoothLeService}, which in turn interacts with the
  * Bluetooth LE API.
  */
-public class DeviceControlActivity extends Activity {
+public class DeviceControlActivity extends Activity implements View.OnClickListener {
     private final static String TAG = "OpenBCIBLE/"+ DeviceControlActivity.class.getSimpleName();
 
     public static final String EXTRAS_DEVICE_NAME = "DEVICE_NAME";
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
-    private static final byte[] mCommands = {'b','s'};
-    private static int mCommandIdx = 0;
+    private static final int REQUEST_PERMISSION_WRITE_EXTERNAL_STORAGE = 1;
     private TextView mConnectionState;
     private String mDeviceName;
     private String mDeviceAddress;
-    private BluetoothLeService mBluetoothLeService;
+    private static BluetoothLeService mBluetoothLeService;
     private ArrayList<ArrayList<BluetoothGattCharacteristic>> mGattCharacteristics = new ArrayList<>();
     private boolean mConnected = false;
     private BluetoothGattCharacteristic mNotifyOnRead;
-    private BluetoothGattCharacteristic mGanglionSend;
+    private static BluetoothGattCharacteristic mGanglionSend;
 
     private boolean mIsDeviceGanglion= false;;
 
@@ -82,10 +84,12 @@ public class DeviceControlActivity extends Activity {
     private final String LIST_UUID = "UUID";
 
     private Button bStream;
+    private Button b18bit;
+    private Button bImpedance;
 
     //CSV File  will get saved in Documents/test/filename
-    private final File path = getStorageDir("test");
-    private final String fileName= "test3.csv";
+    private File path;
+    private String fileName= "ganglion_test.csv";
 
 
 
@@ -103,7 +107,7 @@ public class DeviceControlActivity extends Activity {
             // Automatically connects to the device upon successful start-up initialization.
             Log.v(TAG,"Trying to connect to GATTServer on: "+mDeviceName+" Address: "+mDeviceAddress );
             mBluetoothLeService.connect(mDeviceAddress);
-            mCommandIdx = 0;
+
 
         }
 
@@ -140,30 +144,69 @@ public class DeviceControlActivity extends Activity {
                 // Show all the supported services and characteristics on the user interface.
                displayGattServices(mBluetoothLeService.getSupportedGattServices());
             } else if (BluetoothLeService.ACTION_DATA_AVAILABLE.equals(action)) {
-                //displayData(intent.getStringExtra(BluetoothLeService.EXTRA_DATA));
+
+
                 String dataType = intent.getStringExtra(BluetoothLeService.DATA_TYPE);
-                if (Objects.equals(dataType, "RAW")) {
-                    int[] samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                    int[] intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                    writetoCSV( path, fileName,
-                            samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n");
-                } else if (Objects.equals(dataType, "19BIT")){
-                    int[] samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                    int[] intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                    int[] intentData2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
-                    writetoCSV( path, fileName,
-                            samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
-                                    samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3] +"\n");
-                } else{
-                    //handle this
+                int[] samples;
+                int[] intentData1;
+                int[] intentData2;
+                int[] intentData3;
+
+
+                switch (dataType){
+
+                    case "RAW":
+                        samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        intentData2 = null;
+                        writetoCSV( path, fileName,
+                                samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n");
+                        break;
+
+                    case "19BIT":
+                        samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        intentData2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
+                        writetoCSV( path, fileName,
+                                samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
+                                        samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3] +"\n");
+                        break;
+
+                    case "18BIT":
+                        samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        intentData2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
+                        intentData3=intent.getIntArrayExtra(BluetoothLeService.ACCEL_DATA);
+
+                        //If intentData3 is non null, we receive accelerometerdata in addition to the channels
+                        if(intentData3 !=null){
+                            writetoCSV( path, fileName,
+                                    samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
+                                            samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3]
+                                            + "," + intentData3[0] + "," + intentData3[1] + "," + intentData3[2]+"\n");
+                        }
+                        else{
+                            writetoCSV( path, fileName,
+                                    samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
+                                            samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3] +"\n");
+                        }
+
+                        break;
+
+                    case "IMPEDANCE":
+                        intentData1=intent.getIntArrayExtra(BluetoothLeService.IMPEDANCE);
+                        writetoCSV( path, fileName,
+                                intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n");
+                        break;
+
+                }
                 }
 
-            }
         }
     };
 
 
-    private boolean setCharacteristicNotification(BluetoothGattCharacteristic currentNotify, BluetoothGattCharacteristic newNotify, String toastMsg){
+   /* private boolean setCharacteristicNotification(BluetoothGattCharacteristic currentNotify, BluetoothGattCharacteristic newNotify, String toastMsg){
         if(currentNotify==null){//none registered previously
             mBluetoothLeService.setCharacteristicNotification(newNotify, true);
         }
@@ -179,7 +222,7 @@ public class DeviceControlActivity extends Activity {
         }
         Toast.makeText(getApplicationContext(), "Notify: "+toastMsg, Toast.LENGTH_SHORT).show();
         return true;//indicates reassignment needed for mNotifyOnRead
-    }
+    }*/
 
 
     @Override
@@ -187,6 +230,7 @@ public class DeviceControlActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.gatt_services_characteristics);
 
+        path = getStorageDir("test");
         //this activity was started by another with data stored in an intent, process it
         final Intent intent = getIntent();
 
@@ -194,7 +238,7 @@ public class DeviceControlActivity extends Activity {
         mDeviceName = intent.getStringExtra(EXTRAS_DEVICE_NAME);
         mDeviceAddress = intent.getStringExtra(EXTRAS_DEVICE_ADDRESS);
 
-        //set flags if CYTON or GANGLION is being used
+        //set flags if GANGLION is being used
         Log.v(TAG,"deviceName '"+mDeviceName+"'");
         if(mDeviceName!=null) {
             mIsDeviceGanglion = mDeviceName.toUpperCase().contains(SampleGattAttributes.DEVICE_NAME_GANGLION);
@@ -204,15 +248,16 @@ public class DeviceControlActivity extends Activity {
         mConnectionState = (TextView) findViewById(R.id.connection_state);
 
         bStream=findViewById(R.id.toggle_stream);
-        bStream.setOnClickListener(new View.OnClickListener() {
+        bStream.setOnClickListener(this);
+        b18bit=findViewById(R.id.toggle_18bit);
+        b18bit.setOnClickListener(this);
+        bImpedance=findViewById(R.id.toggle_impedance);
+        bImpedance.setOnClickListener(this);
+       /* bStream.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View view) {
                if(mConnected){
-                   //TODO access send characteristic here
-                   //BluetoothGattCharacteristic characteristic = "2d30c083-f39f-4ce6-923f-3484ea480596";
 
-                        //we use this only when the device is a ganglion
-                        //char c = toggleDataStream(characteristic);
                         char cmd = (char) mCommands[mCommandIdx];
                         Log.v(TAG,"Sending Command : "+cmd);
                         mGanglionSend.setValue(new byte[]{(byte)cmd});
@@ -222,7 +267,7 @@ public class DeviceControlActivity extends Activity {
 
                 }
             }
-        });
+        });*/
 
         getActionBar().setTitle(mDeviceName);
         getActionBar().setDisplayHomeAsUpEnabled(true);
@@ -257,6 +302,28 @@ public class DeviceControlActivity extends Activity {
         mBluetoothLeService = null;
     }
 
+    public void onClick(View view) {
+
+        switch (view.getId()) {
+            case R.id.toggle_stream:
+                if (mConnected) {
+                    sendData(true);
+                } else{
+                    sendData(false);
+                }
+                break;
+            case R.id.toggle_18bit:
+                if (mConnected){
+                    toggleAccelerometer(true);
+                }
+                break;
+            case R.id.toggle_impedance:
+                if (!mConnected){
+                    impedanceCheck(true);
+                }
+        }
+
+    }
 
     private void updateConnectionState(final int resourceId) {
         runOnUiThread(new Runnable() {
@@ -379,7 +446,9 @@ public class DeviceControlActivity extends Activity {
 
     public static File getStorageDir(String folderName) {
         // Get the directory for the user's public documents directory.
+        isExternalStorageWritable();
         File documents = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+
         //path will be storage/sdcard/documents/foldername
         File path = new File(documents, folderName);
         Log.d("getStorageDir", path.toString());
@@ -388,4 +457,98 @@ public class DeviceControlActivity extends Activity {
         }
         return path;
     }
+
+
+
+
+    public static  void sendData(boolean send){
+        //b starts the stream, s stops it
+        final byte[] mCommands = {'b','s'};
+        char cmd;
+
+        //if send is true, start the stream, if false send stop char
+        if(send){
+            cmd=(char) mCommands[0];
+        }
+        else{
+            cmd=(char) mCommands[1];
+        }
+
+        Log.v(TAG,"Sending Command : "+cmd);
+        mGanglionSend.setValue(new byte[]{(byte)cmd});
+        mBluetoothLeService.writeCharacteristic((mGanglionSend));
+        //  mCommandIdx = (mCommandIdx +1)% mCommands.length; //update for next run to toggle off
+    }
+
+    public static  void toggleAccelerometer(boolean send){
+        //n activates the onboard Accelerometer, N deactivates it
+        //when the Accelerometer is activated, the board will switch to 18 bit compression
+        final byte[] mCommands = {'n','N'};
+        char cmd;
+
+        if(send){
+            cmd=(char) mCommands[0];
+        }
+        else{
+            cmd=(char) mCommands[1];
+        }
+
+        Log.v(TAG,"Sending Command : "+cmd);
+        mGanglionSend.setValue(new byte[]{(byte)cmd});
+        mBluetoothLeService.writeCharacteristic((mGanglionSend));
+    }
+
+    public static void impedanceCheck(boolean send){
+        //z starts the stream, Z stops it
+        final byte[] mCommands = {'z','Z'};
+        char cmd;
+
+        //if send is true, start the impedance check, if false send stop char
+        if(send){
+            cmd=(char) mCommands[0];
+        }
+        else{
+            cmd=(char) mCommands[1];
+        }
+
+        Log.v(TAG,"Sending Command : "+cmd);
+        mGanglionSend.setValue(new byte[]{(byte)cmd});
+        mBluetoothLeService.writeCharacteristic((mGanglionSend));
+    }
+
+    public static void toggleChannel(boolean turnOffChannel, int channel){
+        //Toggle Channels 1-4 on or off
+        final byte[] mCommands;
+        char cmd;
+        switch(channel){
+            case 1: mCommands = new byte[] {'1','!'};
+                break;
+            case 2: mCommands = new byte[] {'2','@'};
+                break;
+            case 3: mCommands = new byte[] {'3','#'};
+                break;
+            case 4: mCommands = new byte[] {'4','$'};
+                break;
+            default:
+                Log.v(TAG,"Invalid channel : ");
+                return;
+        }
+
+        //if send is true,the channel is turned off, if false it is turned on
+        if(turnOffChannel){
+            cmd=(char) mCommands[0];
+        }
+        else{
+            cmd=(char) mCommands[1];
+        }
+
+        Log.v(TAG,"Sending Command : "+cmd);
+        try {
+            mGanglionSend.setValue(new byte[]{(byte)cmd});
+        } catch (NullPointerException e) {
+            e.printStackTrace();
+        }
+        mBluetoothLeService.writeCharacteristic((mGanglionSend));
+    }
+
 }

@@ -65,9 +65,22 @@
         android:layout_height="wrap_content"
         android:text="Toggle Stream" />
 
-    <ExpandableListView android:id="@+id/gatt_services_list"
-            android:layout_width="match_parent"
-            android:layout_height="328dp"/>
+    <Button
+        android:id="@+id/toggle_18bit"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="18 Bit" />
+
+    <Button
+        android:id="@+id/toggle_impedance"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Impedance" />
+
+    <ExpandableListView
+        android:id="@+id/gatt_services_list"
+        android:layout_width="match_parent"
+        android:layout_height="328dp" />
 
     <TextView
         android:id="@+id/textView"
