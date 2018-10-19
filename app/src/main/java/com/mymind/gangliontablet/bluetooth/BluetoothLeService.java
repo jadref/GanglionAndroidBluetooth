@@ -297,7 +297,7 @@ public class BluetoothLeService extends Service {
     private static void parseImpedance(int packetID, byte[] payload){
 
         //Dealing with Impedance check
-        if(payload[payload.length-2] != 'Z' || payload[payload.length-1]!='\n'){
+        if(payload[payload.length-1] != 'Z' ){
             Log.e(TAG, "Wrong format for impedance check, should be ASCII ending with 'Z\\n'");
         }
 
@@ -305,7 +305,6 @@ public class BluetoothLeService extends Service {
         byte[] bytes= Arrays.copyOfRange(payload, 0, payload.length-2);
         //convert from ASCII to actual value in kOhm
         String Impedance = new String(bytes);
-        Log.wtf(TAG, "Impedance Value " + Impedance);
         switch(packetID){
             case 201:
                 lastImpedance[0]=Integer.parseInt(Impedance);

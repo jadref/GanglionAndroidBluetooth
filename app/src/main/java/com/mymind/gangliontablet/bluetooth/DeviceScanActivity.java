@@ -332,7 +332,7 @@ public class DeviceScanActivity extends ListActivity {
                 // If request is cancelled, the result arrays are empty.
                 if (grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED) {
                     // Permission was granted, yay!
-                    //TODO do something
+
                 } else {
                     // Permission denied, boo!
                     final boolean needRationale = ActivityCompat.shouldShowRequestPermissionRationale(this, Manifest.permission.ACCESS_COARSE_LOCATION);

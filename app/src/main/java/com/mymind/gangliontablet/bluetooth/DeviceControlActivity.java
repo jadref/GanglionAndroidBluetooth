@@ -147,56 +147,72 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
 
 
                 String dataType = intent.getStringExtra(BluetoothLeService.DATA_TYPE);
-                int[] samples;
-                int[] intentData1;
-                int[] intentData2;
-                int[] intentData3;
+                int[] sampleID;
+                int[] sample1;
+                int[] sample2;
+                int[] accelerometer;
 
 
                 switch (dataType){
-
+                    /** SCALING FACTOR FOR DATA NOT YET INCLUDED
+                     * CHECKOUT http://docs.openbci.com/Hardware/08-Ganglion_Data_Format
+                     * ITNERPRETING THE EEG DATA
+                     * EEG
+                     * Scale Factor (Volts/count) = 1.2 Volts * 8388607.0 * 1.5 * 51.0;
+                     * Accelerometer
+                     * Accelerometer Scale Factor = 0.032;
+                     */
                     case "RAW":
-                        samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                        intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                        intentData2 = null;
-                        writetoCSV( path, fileName,
-                                samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n");
-                        break;
+                        sampleID=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        sample1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        sample2 = null;
+                        Log.d("RAW",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
+                       /* writetoCSV( path, fileName,
+                                sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n");
+                        */break;
 
                     case "19BIT":
-                        samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                        intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                        intentData2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
-                        writetoCSV( path, fileName,
-                                samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
-                                        samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3] +"\n");
+                        sampleID=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        sample1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        sample2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
+                        Log.d("19BIT",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
+                        Log.d("19BIT",sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] );
+                       /* writetoCSV( path, fileName,
+                                sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n" +
+                                        sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] +"\n");*/
                         break;
 
                     case "18BIT":
-                        samples=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                        intentData1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                        intentData2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
-                        intentData3=intent.getIntArrayExtra(BluetoothLeService.ACCEL_DATA);
+                        sampleID=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        sample1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        sample2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
+                        accelerometer=intent.getIntArrayExtra(BluetoothLeService.ACCEL_DATA);
 
-                        //If intentData3 is non null, we receive accelerometerdata in addition to the channels
-                        if(intentData3 !=null){
-                            writetoCSV( path, fileName,
-                                    samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
-                                            samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3]
-                                            + "," + intentData3[0] + "," + intentData3[1] + "," + intentData3[2]+"\n");
+                        //If accelerometer is non null, we receive accelerometerdata in addition to the channels
+                        if(accelerometer !=null){
+                            Log.d("18BIT",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
+                            Log.d("18BIT",sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] );
+                            Log.d("Acc",sampleID[1] + "," + accelerometer[0] + "," + accelerometer[1] + "," + accelerometer[2] );
+                            /*writetoCSV( path, fileName,
+                                    sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n" +
+                                            sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3]
+                                            + "," + accelerometer[0] + "," + accelerometer[1] + "," + accelerometer[2]+"\n");*/
                         }
                         else{
-                            writetoCSV( path, fileName,
-                                    samples[0] + "," + intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n" +
-                                            samples[1] + "," + intentData2[0] + "," + intentData2[1] + "," + intentData2[2] + "," + intentData2[3] +"\n");
+                            Log.d("18BIT",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
+                            Log.d("18BIT",sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] );
+                           /* writetoCSV( path, fileName,
+                                    sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n" +
+                                            sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] +"\n");*/
                         }
 
                         break;
 
                     case "IMPEDANCE":
-                        intentData1=intent.getIntArrayExtra(BluetoothLeService.IMPEDANCE);
-                        writetoCSV( path, fileName,
-                                intentData1[0] + "," + intentData1[1] + "," + intentData1[2] + "," + intentData1[3] +"\n");
+                        sample1=intent.getIntArrayExtra(BluetoothLeService.IMPEDANCE);
+                        Log.d("Impedance",sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
+                       /* writetoCSV( path, fileName,
+                                sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n");*/
                         break;
 
                 }
@@ -318,7 +334,7 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
                 }
                 break;
             case R.id.toggle_impedance:
-                if (!mConnected){
+                if (mConnected){
                     impedanceCheck(true);
                 }
         }
