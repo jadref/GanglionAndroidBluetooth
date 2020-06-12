@@ -67,6 +67,7 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
     public static final String EXTRAS_DEVICE_ADDRESS = "DEVICE_ADDRESS";
     private static final int REQUEST_PERMISSION_WRITE_EXTERNAL_STORAGE = 1;
     private TextView mConnectionState;
+    private TextView mDataView;
     private String mDeviceName;
     private String mDeviceAddress;
     private static BluetoothLeService mBluetoothLeService;
@@ -151,9 +152,9 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
                 int[] sample1;
                 int[] sample2;
                 int[] accelerometer;
+                String sampleText = null;
 
-
-                switch (dataType){
+                switch (dataType) {
                     /** SCALING FACTOR FOR DATA NOT YET INCLUDED
                      * CHECKOUT http://docs.openbci.com/Hardware/08-Ganglion_Data_Format
                      * ITNERPRETING THE EEG DATA
@@ -163,83 +164,52 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
                      * Accelerometer Scale Factor = 0.032;
                      */
                     case "RAW":
-                        sampleID=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                        sample1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        sampleID = intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        sample1 = intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
                         sample2 = null;
-                        Log.d("RAW",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
-                       /* writetoCSV( path, fileName,
-                                sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n");
-                        */break;
+                        sampleText = sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3];
+                        Log.d("RAW", sampleText);
+                        break;
 
                     case "19BIT":
-                        sampleID=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                        sample1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                        sample2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
-                        Log.d("19BIT",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
-                        Log.d("19BIT",sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] );
-                       /* writetoCSV( path, fileName,
-                                sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n" +
-                                        sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] +"\n");*/
+                        sampleID = intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        sample1 = intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        sample2 = intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
+                        sampleText = sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] + '\n' +
+                                sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3];
+                        Log.d("19BIT", sampleText );
                         break;
 
                     case "18BIT":
-                        sampleID=intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
-                        sample1=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
-                        sample2=intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
-                        accelerometer=intent.getIntArrayExtra(BluetoothLeService.ACCEL_DATA);
+                        sampleID = intent.getIntArrayExtra(BluetoothLeService.SAMPLE_ID);
+                        sample1 = intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_1);
+                        sample2 = intent.getIntArrayExtra(BluetoothLeService.FULL_DATA_2);
+                        accelerometer = intent.getIntArrayExtra(BluetoothLeService.ACCEL_DATA);
 
+                        sampleText = sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] + '\n' +
+                                sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3];
                         //If accelerometer is non null, we receive accelerometerdata in addition to the channels
-                        if(accelerometer !=null){
-                            Log.d("18BIT",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
-                            Log.d("18BIT",sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] );
-                            Log.d("Acc",sampleID[1] + "," + accelerometer[0] + "," + accelerometer[1] + "," + accelerometer[2] );
-                            /*writetoCSV( path, fileName,
-                                    sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n" +
-                                            sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3]
-                                            + "," + accelerometer[0] + "," + accelerometer[1] + "," + accelerometer[2]+"\n");*/
+                        if (accelerometer != null) {
+                            sampleText += sampleID[1] + "," + accelerometer[0] + "," + accelerometer[1] + "," + accelerometer[2];
                         }
-                        else{
-                            Log.d("18BIT",sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
-                            Log.d("18BIT",sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] );
-                           /* writetoCSV( path, fileName,
-                                    sampleID[0] + "," + sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n" +
-                                            sampleID[1] + "," + sample2[0] + "," + sample2[1] + "," + sample2[2] + "," + sample2[3] +"\n");*/
-                        }
+                        Log.d("18BIT", sampleText);
 
                         break;
 
                     case "IMPEDANCE":
-                        sample1=intent.getIntArrayExtra(BluetoothLeService.IMPEDANCE);
-                        Log.d("Impedance",sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] );
-                       /* writetoCSV( path, fileName,
-                                sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3] +"\n");*/
+                        sample1 = intent.getIntArrayExtra(BluetoothLeService.IMPEDANCE);
+                        sampleText = sample1[0] + "," + sample1[1] + "," + sample1[2] + "," + sample1[3];
+                        Log.d("Impedance", sampleText);
                         break;
 
                 }
+                if ( sampleText != null ) {
+                    writetoCSV(path, fileName, sampleText + "\n");
+                    mDataView.append(sampleText);
                 }
-
+            }
         }
     };
-
-
-   /* private boolean setCharacteristicNotification(BluetoothGattCharacteristic currentNotify, BluetoothGattCharacteristic newNotify, String toastMsg){
-        if(currentNotify==null){//none registered previously
-            mBluetoothLeService.setCharacteristicNotification(newNotify, true);
-        }
-        else {//something was registered previously
-            if (!currentNotify.getUuid().equals(newNotify.getUuid())) {//we are subscribed to another characteristic?
-                mBluetoothLeService.setCharacteristicNotification(currentNotify, false);//unsubscribe
-                mBluetoothLeService.setCharacteristicNotification(newNotify, true); //subscribe to Receive
-            }
-            else{
-                //no change required
-                return false;
-            }
-        }
-        Toast.makeText(getApplicationContext(), "Notify: "+toastMsg, Toast.LENGTH_SHORT).show();
-        return true;//indicates reassignment needed for mNotifyOnRead
-    }*/
-
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
@@ -269,22 +239,7 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
         b18bit.setOnClickListener(this);
         bImpedance=findViewById(R.id.toggle_impedance);
         bImpedance.setOnClickListener(this);
-       /* bStream.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-               if(mConnected){
-
-                        char cmd = (char) mCommands[mCommandIdx];
-                        Log.v(TAG,"Sending Command : "+cmd);
-                        mGanglionSend.setValue(new byte[]{(byte)cmd});
-                        mBluetoothLeService.writeCharacteristic((mGanglionSend));
-                        mCommandIdx = (mCommandIdx +1)% mCommands.length; //update for next run to toggle off
-                        Toast.makeText(getApplicationContext(), "Sent: '"+cmd+"' to Ganglion", Toast.LENGTH_SHORT).show();
-
-                }
-            }
-        });*/
-
+        mDataView = (TextView) findViewById(R.id.data_value);
         getActionBar().setTitle(mDeviceName);
         getActionBar().setDisplayHomeAsUpEnabled(true);
         Intent gattServiceIntent = new Intent(this, BluetoothLeService.class);
@@ -473,9 +428,6 @@ public class DeviceControlActivity extends Activity implements View.OnClickListe
         }
         return path;
     }
-
-
-
 
     public static  void sendData(boolean send){
         //b starts the stream, s stops it
