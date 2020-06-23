@@ -16,13 +16,12 @@
 -->
 
 <resources>
-    <string name="app_name">OpenBCIBLE Basic</string>
+    <string name="app_name">mindaffectBCI Decoder</string>
     <string name="intro_message">
         <![CDATA[
         
             
-            Using the basic Bluetooth LE Generic Attribute Profile (GATT) example to transmit arbitrary data between devices,
-            we demonstrate connection to the Ganglion and Cyton
+            Use BLE to connect to the first openBCI Ganglion and startup the mindaffectBCI decoder.
             
         
         ]]>
