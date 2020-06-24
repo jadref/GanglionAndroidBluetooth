@@ -12,12 +12,14 @@ import android.support.annotation.RequiresApi;
 import android.util.Log;
 import android.view.Choreographer;
 import android.view.View;
+import android.view.Window;
 import android.widget.Button;
 import android.widget.TextView;
 
 
 import java.io.File;
 import java.io.IOException;
+import java.net.SocketException;
 import java.time.chrono.MinguoChronology;
 import java.util.LinkedList;
 import java.util.List;
@@ -31,31 +33,49 @@ import nl.ma.utopiaserver.messages.DataPacket;
 import nl.ma.utopiaserver.messages.SignalQuality;
 import nl.ma.utopiaserver.messages.UtopiaMessage;
 
+
+import android.net.wifi.WifiManager;
+import android.net.wifi.WifiManager.MulticastLock;
+
+import org.w3c.dom.Text;
+
 public class BootActivity extends Activity {
 
     private static final String TAG = BootActivity.class.getSimpleName();
     UtopiaServer utopiaServer;
-    Thread serverThread =  null;
-    GanglionAndroidBluetooth gab=null;
-    Thread ganglionThread= null;
+    Thread serverThread = null;
+    GanglionAndroidBluetooth gab = null;
+    Thread ganglionThread = null;
     Thread decoderThread = null;
-    List<Button> chBut   = new LinkedList<Button>();
-    List<View> chart     = new LinkedList<View>();
+    List<Button> chBut = new LinkedList<Button>();
+    List<View> chart = new LinkedList<View>();
     TextView text_state = null;
     TextView device_ID = null;
-    CountDownTimer chartUpdate=null;
+    TextView hostIP = null;
+    CountDownTimer chartUpdate = null;
     private int dataTrackingStart;
     private int nsample;
+    WifiManager.MulticastLock multicastlock;
 
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.acitivity_main);
 
+        /* Turn off multicast filter */
+        WifiManager wifi = (WifiManager) getSystemService(WIFI_SERVICE);
+        if (wifi != null) {
+            multicastlock = wifi.createMulticastLock("gab_multicastlock");
+            multicastlock.acquire();
+        }
+
+        //Window window = getWindow();
+        //window.addOnFrameMetricsAvailableListener();
+
         // TODO []: move this to a service?
         // TODO [x]: tell it where to save the logs...
 
-        if ( utopiaServer == null ) {
+        if (utopiaServer == null) {
             File external = getExternalFilesDir(null);
             String dataFile = null;
             if (external != null && external.canWrite()) {
@@ -66,7 +86,7 @@ public class BootActivity extends Activity {
             serverThread = utopiaServer.startServerThread(Thread.NORM_PRIORITY + 2, false);
         }
 
-        if ( gab == null ) {
+        if (gab == null) {
             gab = new GanglionAndroidBluetooth(this);
             gab.initialize(this);
             ganglionThread = new Thread(gab);
@@ -75,7 +95,7 @@ public class BootActivity extends Activity {
 
         // TODO [x]: start the decoder service..
         ServiceMindaffectbci.prepare(this.getApplication().getApplicationContext());
-        ServiceMindaffectbci.start(this.getApplication().getApplicationContext(),"");
+        ServiceMindaffectbci.start(this.getApplication().getApplicationContext(), "");
 
         // setup the links to the channel button and plots
         chBut.add((Button) findViewById(R.id.button));
@@ -91,16 +111,19 @@ public class BootActivity extends Activity {
         text_state.setText("disconnected - searching");
         device_ID = (TextView) findViewById(R.id.text_ID);
         device_ID.setText("searching");
+        hostIP = (TextView) findViewById(R.id.text_host_ip);
+        hostIP.setText(gethostIPs());
     }
 
 
     public void onResume() {
         super.onResume();
-        chartUpdate = new CountDownTimer(15000,250) {
+        chartUpdate = new CountDownTimer(15000, 250) {
             @Override
             public void onTick(long millisUntilFinished) {
                 chartUpdateTick();
             }
+
             @Override
             public void onFinish() {
                 // re-start when done.
@@ -108,21 +131,21 @@ public class BootActivity extends Activity {
             }
         };
         chartUpdate.start();
-        utopiaServer.flushInMessageQueue=false;
+        utopiaServer.flushInMessageQueue = false;
         // reset the sample tracking info
-        nsample=-1;
+        nsample = -1;
     }
 
-    public void onPause(){
+    public void onPause() {
         super.onPause();
         // stop updating the plots when not visible
         chartUpdate.cancel();
-        utopiaServer.flushInMessageQueue=true;
+        utopiaServer.flushInMessageQueue = true;
     }
 
-    public void onDestroy(){
+    public void onDestroy() {
         super.onDestroy();
-        if ( isFinishing() ) {
+        if (isFinishing()) {
             // only cleanup if we are actually being destroyed!, i.e. not on rotation.
             Log.v(TAG, "Killing client threads");
             if (ganglionThread != null) {
@@ -131,6 +154,8 @@ public class BootActivity extends Activity {
             if (serverThread != null) {
                 serverThread.interrupt();
             }
+            // release multi-cast lock
+            multicastlock.release();
             // TODO[] does this work?  A: no!
             //ServiceMindaffectbci.stop();
         }
@@ -140,43 +165,68 @@ public class BootActivity extends Activity {
         device_ID.setText(gab.getmBluetoothDeviceAddress());
 
         List<ServerUtopiaMessage> newmsgs = utopiaServer.popMessages();
-        for ( ServerUtopiaMessage svrmsg : newmsgs ){
+        for (ServerUtopiaMessage svrmsg : newmsgs) {
             UtopiaMessage msg = svrmsg.clientmsg;
-            if ( msg.msgID() == SignalQuality.MSGID ){
+            if (msg.msgID() == SignalQuality.MSGID) {
                 // update the signal-quality display
-                onSignalQuality((SignalQuality)msg);
-            } else if ( msg.msgID() == DataPacket.MSGID ){
+                onSignalQuality((SignalQuality) msg);
+            } else if (msg.msgID() == DataPacket.MSGID) {
                 // update the raw signal display
-                onDataPacket((DataPacket)msg);
+                onDataPacket((DataPacket) msg);
             }
         }
     }
 
     private void onSignalQuality(SignalQuality msg) {
-        int chi=0;
-        Log.v(TAG,"SigQ:"+msg.toString());
-        for ( Button but : chBut ) {
-            if ( chi >= msg.signalQuality.length )
+        int chi = 0;
+        Log.v(TAG, "SigQ:" + msg.toString());
+        for (Button but : chBut) {
+            if (chi >= msg.signalQuality.length)
                 break;
             float noise2sig = msg.signalQuality[chi];
-            double qual = Math.log10(noise2sig)/2;  // n2s=50->1 n2s=10->.5 n2s=1->0
+            double qual = Math.log10(noise2sig) / 2;  // n2s=50->1 n2s=10->.5 n2s=1->0
             qual = Math.max(0, Math.min(qual, 1)); // clip
-            but.setBackgroundTintList(ColorStateList.valueOf(Color.rgb((float)qual,(float)(1.0f-qual),0f)));
-            but.setText(String.format("Ch%d\n%4.0f",chi,qual));
+            but.setBackgroundTintList(ColorStateList.valueOf(Color.rgb((float) qual, (float) (1.0f - qual), 0f)));
+            but.setText(String.format("Ch%d\n%4.0f", chi, qual));
             chi++;
         }
     }
 
     private void onDataPacket(DataPacket msg) {
         //Log.v(TAG,"onDataPacket"+msg.toString());
-        if ( nsample < 0 ){
+        if (nsample < 0) {
             nsample = 0;
-            dataTrackingStart=utopiaServer.gettimeStamp();
+            dataTrackingStart = utopiaServer.gettimeStamp();
         }
         nsample = nsample + msg.nsamples;
-        float elapsed = (utopiaServer.gettimeStamp() - dataTrackingStart)/1000.0f;
-        text_state.setText(String.format("%d / %5.3fs = %5.3fHz",nsample,elapsed,nsample/elapsed));
+        float elapsed = (utopiaServer.gettimeStamp() - dataTrackingStart) / 1000.0f;
+        text_state.setText(String.format("%d / %5.3fs = %5.3fHz", nsample, elapsed, nsample / elapsed));
 
         //TODO[] draw a live plot?
+    }
+
+
+    public String gethostIPs() {
+        System.out.println(TAG + " Full list of Utopia-server addresses");
+        java.util.Enumeration<java.net.NetworkInterface> ifcs = null;
+        StringBuilder hostIDs = new StringBuilder();
+        try {
+            ifcs = java.net.NetworkInterface.getNetworkInterfaces();
+            while (ifcs.hasMoreElements()) {
+                java.net.NetworkInterface ifc = ifcs.nextElement();
+                if (ifc.isUp()) {
+                    java.util.Enumeration<java.net.InetAddress> addrs = ifc.getInetAddresses();
+                    while (addrs.hasMoreElements()) {
+                        java.net.InetAddress tmp = addrs.nextElement();
+                        if (tmp instanceof java.net.Inet4Address) {
+                            hostIDs.append(", " + tmp);
+                        }
+                    }
+                }
+            }
+        } catch (SocketException e) {
+            e.printStackTrace();
+        }
+        return hostIDs.toString();
     }
 }
