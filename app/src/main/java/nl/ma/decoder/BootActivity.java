@@ -2,13 +2,18 @@ package nl.ma.decoder;
 
 import android.app.Activity;
 import android.app.Service;
+import android.content.Context;
 import android.content.res.ColorStateList;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.Path;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
 import android.os.Environment;
 import android.support.annotation.RequiresApi;
+import android.util.AttributeSet;
 import android.util.Log;
 import android.view.Choreographer;
 import android.view.View;
@@ -21,6 +26,7 @@ import java.io.File;
 import java.io.IOException;
 import java.net.SocketException;
 import java.time.chrono.MinguoChronology;
+import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
 
@@ -47,8 +53,8 @@ public class BootActivity extends Activity {
     GanglionAndroidBluetooth gab = null;
     Thread ganglionThread = null;
     Thread decoderThread = null;
-    List<Button> chBut = new LinkedList<Button>();
-    List<View> chart = new LinkedList<View>();
+    List<Button> chBut = new LinkedList<>();
+    List<LineView> chLineView = new LinkedList<>();
     TextView text_state = null;
     TextView device_ID = null;
     TextView hostIP = null;
@@ -57,10 +63,15 @@ public class BootActivity extends Activity {
     private int nsample;
     WifiManager.MulticastLock multicastlock;
 
+    Deque<DataPacket> dataringbuffer = new LinkedList<>();
+    int datawindow_ms = 5000;
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.acitivity_main);
+
+
 
         /* Turn off multicast filter */
         WifiManager wifi = (WifiManager) getSystemService(WIFI_SERVICE);
@@ -102,10 +113,10 @@ public class BootActivity extends Activity {
         chBut.add((Button) findViewById(R.id.button2));
         chBut.add((Button) findViewById(R.id.button3));
         chBut.add((Button) findViewById(R.id.button4));
-        chart.add(findViewById(R.id.view));
-        chart.add(findViewById(R.id.view2));
-        chart.add(findViewById(R.id.view3));
-        chart.add(findViewById(R.id.view4));
+        chLineView.add((LineView)findViewById(R.id.view));
+        chLineView.add((LineView)findViewById(R.id.view2));
+        chLineView.add((LineView)findViewById(R.id.view3));
+        chLineView.add((LineView)findViewById(R.id.view4));
 
         text_state = (TextView) findViewById(R.id.text_state);
         text_state.setText("disconnected - searching");
@@ -187,23 +198,104 @@ public class BootActivity extends Activity {
             double qual = Math.log10(noise2sig) / 2;  // n2s=50->1 n2s=10->.5 n2s=1->0
             qual = Math.max(0, Math.min(qual, 1)); // clip
             but.setBackgroundTintList(ColorStateList.valueOf(Color.rgb((float) qual, (float) (1.0f - qual), 0f)));
-            but.setText(String.format("Ch%d\n%4.0f", chi, qual));
+            but.setText(String.format("Ch%d\n%4.0f", chi, noise2sig));
             chi++;
         }
     }
 
     private void onDataPacket(DataPacket msg) {
         //Log.v(TAG,"onDataPacket"+msg.toString());
+        int t = utopiaServer.gettimeStamp();
         if (nsample < 0) {
             nsample = 0;
-            dataTrackingStart = utopiaServer.gettimeStamp();
+            dataTrackingStart = t;
+            dataringbuffer.clear();
         }
+
+        // add to the data ring-buffer
+        dataringbuffer.addLast(msg);
+        if ( msg.timeStamp - dataringbuffer.peekFirst().timeStamp > datawindow_ms  ){
+            dataringbuffer.removeFirst();
+        }
+
         nsample = nsample + msg.nsamples;
-        float elapsed = (utopiaServer.gettimeStamp() - dataTrackingStart) / 1000.0f;
+        float elapsed = (t - dataTrackingStart) / 1000.0f;
         text_state.setText(String.format("%d / %5.3fs = %5.3fHz", nsample, elapsed, nsample / elapsed));
 
-        //TODO[] draw a live plot?
+        // pre-compute number samples in buffer
+        int nsamples=0;
+        for ( DataPacket dp : dataringbuffer ) nsamples += dp.nsamples;
+        float [] vals = new float[nsamples];
+        int chi=0;
+        for ( LineView chplt : chLineView ){
+            // get this channels data
+            int ti=0;
+            for ( DataPacket dp : dataringbuffer ){
+                float [][] samples = dp.getSamples();
+                for ( int i=0; i<samples.length; i++, ti++){
+                    vals[ti]=samples[i][chi];
+                }
+            }
+            // update the view's line
+            chplt.setLine(vals);
+            chi++;
+        }
     }
+
+    public static class LineView extends View {
+        float yscale=20;
+        private Paint mPaint = null;
+        private Path mPath = null;
+
+        public LineView(Context context, AttributeSet attrs){
+            super(context,attrs);
+            mPaint = new Paint();
+            mPaint.setColor(Color.BLACK);
+            mPaint.setStyle(Paint.Style.STROKE);
+            mPaint.setStrokeWidth(3.0f);
+        }
+
+        public void setLine(float[] line){
+            mPath = new Path();
+            int width = getMeasuredWidth();
+            int height = getMeasuredHeight();
+            float yscale = height*1.0f/this.yscale;
+            float yoffset = height*.5f;
+            float xscale = width*1.0f/line.length;
+            float xoffset = 0f;
+
+            // update the path with this line
+
+            // compute average over last few samples to center the lines
+            float ycenter = 0;
+            int N = (int) (line.length*.10f);
+            for ( int i=line.length-N; i<line.length; i++) {
+                float li=line[i];
+                ycenter += line[i];
+            }
+            ycenter = ycenter / N;
+
+            float x=0;
+            int i=0, j=0;
+            for ( float y : line ){
+                y = y - ycenter;
+                if ( x == 0 ) { // starting point
+                    mPath.moveTo( x * xscale + xoffset, y * yscale + yoffset);
+                } else {
+                    mPath.lineTo(x * xscale + xoffset, y * yscale + yoffset);
+                }
+                x++;
+            }
+            invalidate();
+        }
+        public void onDraw(Canvas canvas){
+            super.onDraw(canvas);
+            if ( mPath != null )
+                canvas.drawPath(mPath,mPaint);
+        }
+    }
+
+
 
 
     public String gethostIPs() {

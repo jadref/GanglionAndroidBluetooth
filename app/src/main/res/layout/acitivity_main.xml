@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:layout_width="wrap_content"
+    android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:layout_gravity="center"
     android:orientation="vertical"
@@ -14,9 +14,8 @@
 
         <TextView
             android:id="@+id/label_host_ip"
-            android:layout_width="wrap_content"
+            android:layout_width="67dp"
             android:layout_height="wrap_content"
-            android:layout_weight="0"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
             android:paddingRight="0dp"
@@ -40,15 +39,13 @@
             android:textSize="24sp" />
 
         <Space
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_weight=".05" />
+            android:layout_width="15dp"
+            android:layout_height="match_parent" />
 
         <TextView
             android:id="@+id/text__device_ID"
-            android:layout_width="wrap_content"
+            android:layout_width="109dp"
             android:layout_height="wrap_content"
-            android:layout_weight="0"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
             android:paddingRight="0dp"
@@ -120,17 +117,17 @@
 
             <Button
                 android:id="@+id/button"
-                android:layout_width="67dp"
+                android:layout_width="100dp"
                 android:layout_height="match_parent"
-                android:layout_weight=".2"
                 android:backgroundTintMode="src_atop"
-                android:text="Button" />
+                android:text="Ch 1" />
 
-            <View
+            <view
                 android:id="@+id/view"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_weight=".8" />
+                class="nl.ma.decoder.BootActivity$LineView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_weight="1" />
         </TableRow>
 
         <TableRow
@@ -141,17 +138,17 @@
 
             <Button
                 android:id="@+id/button2"
-                android:layout_width="186dp"
-                android:layout_height="match_parent"
-                android:layout_weight=".2"
-                android:backgroundTintMode="src_atop"
-                android:text="Button" />
-
-            <View
-                android:id="@+id/view2"
                 android:layout_width="match_parent"
                 android:layout_height="match_parent"
-                android:layout_weight=".8" />
+                android:backgroundTintMode="src_atop"
+                android:text="Ch 2" />
+
+            <view
+                android:id="@+id/view2"
+                class="nl.ma.decoder.BootActivity$LineView"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:layout_weight="1" />
         </TableRow>
 
         <TableRow
@@ -162,17 +159,17 @@
 
             <Button
                 android:id="@+id/button3"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:backgroundTintMode="src_atop"
+                android:text="Ch 3" />
+
+            <view
+                android:id="@+id/view3"
+                class="nl.ma.decoder.BootActivity$LineView"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                android:layout_weight=".2"
-                android:backgroundTintMode="src_atop"
-                android:text="Button" />
-
-            <View
-                android:id="@+id/view3"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_weight=".8" />
+                android:layout_weight="1" />
         </TableRow>
 
         <TableRow
@@ -183,16 +180,16 @@
 
             <Button
                 android:id="@+id/button4"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:text="Ch 4" />
+
+            <view
+                android:id="@+id/view4"
+                class="nl.ma.decoder.BootActivity$LineView"
                 android:layout_width="wrap_content"
                 android:layout_height="match_parent"
-                android:layout_weight=".2"
-                android:text="Button" />
-
-            <View
-                android:id="@+id/view4"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:layout_weight=".8" />
+                android:layout_weight="1" />
         </TableRow>
     </TableLayout>
 
