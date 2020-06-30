@@ -14,6 +14,10 @@
  * limitations under the License.
  */
 
+ // TODO []: This is horrible !  needs to be refactored into smaller bits, e.g. per-service classes.  Ganglion class, Decoder Class etc.
+
+
+
 package nl.ma.decoder;
 
 import android.Manifest;
@@ -24,9 +28,15 @@ import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
 import android.bluetooth.BluetoothGattDescriptor;
+import android.bluetooth.BluetoothGattServer;
+import android.bluetooth.BluetoothGattServerCallback;
 import android.bluetooth.BluetoothGattService;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
+import android.bluetooth.le.AdvertiseCallback;
+import android.bluetooth.le.AdvertiseData;
+import android.bluetooth.le.AdvertiseSettings;
+import android.bluetooth.le.BluetoothLeAdvertiser;
 import android.bluetooth.le.BluetoothLeScanner;
 import android.bluetooth.le.ScanCallback;
 import android.bluetooth.le.ScanFilter;
@@ -39,18 +49,36 @@ import android.os.ParcelUuid;
 import android.util.Log;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.locks.ReentrantLock;
 
 import static android.bluetooth.BluetoothGatt.CONNECTION_PRIORITY_HIGH;
 import static android.bluetooth.BluetoothGatt.GATT_SUCCESS;
 
+import static android.bluetooth.BluetoothGattCharacteristic.FORMAT_UINT8;
+import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_NOTIFY;
+import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_READ;
+import static android.bluetooth.BluetoothGattCharacteristic.PROPERTY_WRITE;
+import static android.bluetooth.BluetoothGattDescriptor.DISABLE_NOTIFICATION_VALUE;
+import static android.bluetooth.BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE;
+import static android.bluetooth.BluetoothGattDescriptor.PERMISSION_READ;
+import static android.bluetooth.BluetoothGattDescriptor.PERMISSION_WRITE;
+import static android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY;
 import static android.support.v4.app.ActivityCompat.requestPermissions;
 
 import nl.ma.utopiaserver.UtopiaClient;
 import nl.ma.utopiaserver.messages.DataPacket;
+import nl.ma.utopiaserver.messages.PredictedTargetDist;
+import nl.ma.utopiaserver.messages.PredictedTargetProb;
+import nl.ma.utopiaserver.messages.Selection;
+import nl.ma.utopiaserver.messages.StimulusEvent;
+import nl.ma.utopiaserver.messages.UtopiaMessage;
 
 public class GanglionAndroidBluetooth implements Runnable {
 
@@ -59,35 +87,66 @@ public class GanglionAndroidBluetooth implements Runnable {
 
     private BluetoothManager mBluetoothManager;
     private BluetoothAdapter mBluetoothAdapter;
-    private String mBluetoothDeviceAddress;
-    private BluetoothLeScanner mBluetoothLeScanner;
-    private BluetoothGatt mBluetoothGatt;
-    private int mConnectionState = STATE_DISCONNECTED;
+    // list of reg-exps for devices we would connect to
+    private String[] validNameRegexps = new String[]{"[Gg]anglion.*","[Pp]resentation.*","mindaffect.*","[sS]core[oO]utput.*"};
 
-    private static final int STATE_DISCONNECTED = 0;
-    private static final int STATE_SCANNING = 3;
-    private static final int STATE_CONNECTING = 1;
-    private static final int STATE_CONNECTED = 2;
-    private static final int STATE_DISCOVERING = 4;
-    private static final int STATE_DISCOVERED = 5;
-    private static final int STATE_REGISTERING = 6;
-    private static final int STATE_REGISTERED = 7;
-    private static final int STATE_READING = 8;
+    public enum BLESTATE { IDLE, CONNECTING, CONNECTED, WRITING, READING, DISCOVERING, DISCOVERED, DISCONNECTING, DISCONNECTED, NEW, IGNORED };
+    private BLESTATE mBluetoothState = BLESTATE.IDLE;
+    private final ReentrantLock mBluetoothLock = new ReentrantLock();
+    private BluetoothGatt mBluetoothGatt; // currently connected GATT
+    private BluetoothLeScanner mBluetoothLeScanner;
+
+    // Gatt devices we scan for and maintain a list of connections to..
+    private GANGLIONSTATE mGanglionConnectionState = GANGLIONSTATE.DISCONNECTED;
+    private String mGanglionBluetoothDeviceAddress;
+    private BluetoothGatt mGanglionBluetoothGatt;
+    private List<BluetoothGatt> mOutputBluetoothGatt;
+    private List<BluetoothGatt> mPresentationBluetoothGatt;
+    private BluetoothGatt mScoreOutputBluetoothGatt;
+
+    // Server for services we provide, i.e. DECODER, OUTPUT
+    private BluetoothGattServer mBluetoothGattServer;
+    private BluetoothLeAdvertiser mBluetoothLeAdvertiser;
+    private List<BluetoothDevice> mRegisteredDecoderDevices = new ArrayList<>();
+    private PredictedTargetProb mPredictedTargetProb = new PredictedTargetProb(-1,-1,1.0f);
+    private PredictedTargetDist mPredictedTargetDist = new PredictedTargetDist(-1,new int[]{},new float []{});
+    private Selection mSelection = new Selection(-1,0);
+    private List<BluetoothDevice> mRegisteredOutputDevices;
+    private ByteBuffer tmp = ByteBuffer.allocateDirect(8192);
+
+    // N.B. use concurrent version as may modify from mulitple threads!
+    ConcurrentHashMap<BluetoothDevice, BLESTATE> knowDevices = new ConcurrentHashMap<>();
+
+    public static enum GANGLIONSTATE  { DISCONNECTED, SCANNING, CONNECTING, CONNECTED, DISCOVERING, DISCOVERED, REGISTERING, REGISTERED, READING };
 
     public  static final int PERMISSIONS_MULTIPLE_REQUEST = 123;
 
+    public final static UUID UUID_CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
+
     //Ganglion Service/Characteristics UUIDs (SIMBLEE Chip Defaults)
+    public final static String DEVICE_NAME_GANGLION = "GANGLION";
     public final static UUID UUID_GANGLION_SERVICE = UUID.fromString("0000fe84-0000-1000-8000-00805f9b34fb");
     public final static UUID UUID_GANGLION_RECEIVE = UUID.fromString("2d30c082-f39f-4ce6-923f-3484ea480596");
     public final static UUID UUID_GANGLION_SEND = UUID.fromString("2d30c083-f39f-4ce6-923f-3484ea480596");
     public final static UUID UUID_GANGLION_DISCONNECT = UUID.fromString("2d30c084-f39f-4ce6-923f-3484ea480596");
-    public final static UUID UUID_CLIENT_CHARACTERISTIC_CONFIG = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb");
 
-    private BluetoothGattCharacteristic mGanglionReceive;
-    private static BluetoothGattCharacteristic mGanglionSend;
+    // mindaffectBCI Service/Characteristic UUIDs
+    public final static UUID UUID_PRESENTATION_SERVICE = UUID.fromString("d3560000-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_PRESENTATION_STIMULUSSTATE = UUID.fromString("d3560001-b9ff-11ea-b3de-0242ac130004");
+
+    public final static UUID UUID_DECODER_SERVICE = UUID.fromString("d3560100-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_DECODER_PREDICTEDTARGETPROB = UUID.fromString("d3560101-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_DECODER_PREDICTEDTARGETDIST = UUID.fromString("d3560102-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_DECODER_SELECTION = UUID.fromString("d3560103-b9ff-11ea-b3de-0242ac130004");
+
+    //public final static UUID UUID_OUTPUT_SERVICE = UUID.fromString("d3560200-b9ff-11ea-b3de-0242ac130004");
+
+    public final static UUID UUID_SCOREOUTPUT_SERVICE = UUID.fromString("d3560300-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_SCOREOUTPUT_OUTPUTSCORE = UUID.fromString("d3560301-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_SCOREOUTPUT_CURRENTMODEL = UUID.fromString("d3560302-b9ff-11ea-b3de-0242ac130004");
+    public final static UUID UUID_SCOREOUTPUT_CURRENTSOSFILTER = UUID.fromString("d3560303-b9ff-11ea-b3de-0242ac130004");
 
     //Device names
-    public final static String DEVICE_NAME_GANGLION = "GANGLION";
 
     private static int last_id;
     private static int[] lastChannelData = {0, 0, 0, 0};
@@ -110,36 +169,67 @@ public class GanglionAndroidBluetooth implements Runnable {
             String intentAction;
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 Log.i(TAG, "Connected to GATT server.");
-
+                if( mBluetoothState != BLESTATE.CONNECTING){
+                    Log.v(TAG,"Huh! got connection when not in connecting state!");
+                }
+                mBluetoothState = BLESTATE.CONNECTED;
                 // Attempts to discover services after successful connection.
                 Log.i(TAG, "Attempting to start service discovery");
+                knowDevices.put(gatt.getDevice(),BLESTATE.DISCOVERING);
+                mBluetoothState = BLESTATE.DISCOVERING;
                 gatt.discoverServices();
-                mConnectionState = STATE_DISCOVERING;
+                if ( mGanglionBluetoothGatt == null ) {
+                    mGanglionConnectionState = GANGLIONSTATE.DISCOVERING;
+                }
 
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                // TODO[]: Check that the gatt we're trying to connect to is the one that disconnected!
+                if ( mBluetoothState != BLESTATE.DISCONNECTING ) {
+                    Log.i(TAG, "Disconnected while in another state");
+                }
+                mBluetoothState = BLESTATE.IDLE;
                 Log.i(TAG, "Disconnected from GATT server.");
-                mConnectionState = STATE_DISCONNECTED;
+                if ( gatt == mGanglionBluetoothGatt ) {
+                    // only update state if ganglion connection state changed.
+                    mGanglionConnectionState = GANGLIONSTATE.DISCONNECTED;
+                }
+                knowDevices.put(gatt.getDevice(),BLESTATE.DISCONNECTED);
             }
         }
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            if( mBluetoothState != BLESTATE.DISCOVERING ){
+                Log.v(TAG,"Huh!, discovered not in discovering state?");
+            }
             if (status == BluetoothGatt.GATT_SUCCESS) {
+                mBluetoothState = BLESTATE.DISCOVERED;
                 Log.v(TAG, "GattServer Services Discovered");
                 // register to notify on the SEND and RECEIVE characteristics
                 setupServicesAndNotifications(gatt);
-                mConnectionState = STATE_DISCOVERED;
-                mBluetoothDeviceAddress = gatt.getDevice().getName() + " (" + gatt.getDevice().getAddress() +")";
             } else {
                 Log.w(TAG, "onServicesDiscovered received: " + status);
+                mBluetoothState = BLESTATE.IDLE;
             }
         }
 
         @Override
         public void onDescriptorWrite(BluetoothGatt gatt, BluetoothGattDescriptor descriptor, final int status) {
-            BluetoothGattCharacteristic parentCharacteristic = descriptor.getCharacteristic();
-            if (status == GATT_SUCCESS && parentCharacteristic.getUuid().equals(UUID_GANGLION_RECEIVE)) {
-                mConnectionState = STATE_REGISTERED;
+            synchronized (mBluetoothState) {
+                if (mBluetoothState != BLESTATE.WRITING) {
+                    Log.v(TAG, "Warning: on write when not writing?");
+                }
+                BluetoothGattCharacteristic parentCharacteristic = descriptor.getCharacteristic();
+                // do work after notify is setup
+                UUID gattServiceUUID = parentCharacteristic.getService().getUuid();
+                mBluetoothState = BLESTATE.IDLE;
+                if (UUID_GANGLION_SERVICE.equals(gattServiceUUID)) {
+                    onGanglionRegistered();
+                } else if (UUID_PRESENTATION_SERVICE.equals(gattServiceUUID)) {
+                    onPresentationRegistered();
+                } else if (UUID_SCOREOUTPUT_SERVICE.equals(gattServiceUUID)) {
+                    onScoreOutputRegistered();
+                }
             }
         }
 
@@ -147,20 +237,26 @@ public class GanglionAndroidBluetooth implements Runnable {
         public void onCharacteristicWrite(BluetoothGatt gatt,
                                           BluetoothGattCharacteristic characteristic,
                                           int status) {
-            Log.w(TAG, "Written to: " + characteristic.getUuid() + " Status: " + (mBluetoothGatt.GATT_SUCCESS == status));
+            Log.w(TAG, "Written to: " + characteristic.getUuid() + " Status: " + (gatt.GATT_SUCCESS == status));
+            if ( mBluetoothState != BLESTATE.WRITING ){
+                Log.v(TAG,"Warning: on write when not writing?");
+            }
+            mBluetoothState=BLESTATE.IDLE;
         }
-
 
         @Override
         public void onCharacteristicRead(BluetoothGatt gatt,
                                          BluetoothGattCharacteristic characteristic,
                                          int status) {
+            if ( mBluetoothState != BLESTATE.READING ){
+                Log.v(TAG,"Warning: on write when not writing?");
+            }
+            mBluetoothState = BLESTATE.IDLE;
             Log.v(TAG, "Characteristic read");
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                mConnectionState = STATE_READING;
-                if (UUID_GANGLION_RECEIVE.equals(characteristic.getUuid())) {
-                    actionDataAvailable(characteristic);
-                }
+            UUID characteristicUUID = characteristic.getUuid();
+            if (gatt == mGanglionBluetoothGatt && status == BluetoothGatt.GATT_SUCCESS && UUID_GANGLION_RECEIVE.equals(characteristicUUID) ) {
+                mGanglionConnectionState = GANGLIONSTATE.READING;
+                actionDataAvailable(characteristic);
             }
         }
 
@@ -168,49 +264,166 @@ public class GanglionAndroidBluetooth implements Runnable {
         public void onCharacteristicChanged(BluetoothGatt gatt,
                                             BluetoothGattCharacteristic characteristic) {
             //Log.v(TAG,"Characteristic changed");
-            if (UUID_GANGLION_RECEIVE.equals(characteristic.getUuid())) {
-                mConnectionState = STATE_READING;
+            UUID characteristicUUID = characteristic.getUuid();
+            if (gatt == mGanglionBluetoothGatt && UUID_GANGLION_RECEIVE.equals(characteristicUUID)) {
+                mGanglionConnectionState = GANGLIONSTATE.READING;
                 actionDataAvailable(characteristic);
+            } else if ( UUID_PRESENTATION_STIMULUSSTATE.equals(characteristicUUID)){
+                actionStimulusStateAvailable(characteristic);
+            } else if ( UUID_SCOREOUTPUT_OUTPUTSCORE.equals(characteristicUUID)){
+                actionOutputScoreAvailable(characteristic);
             }
         }
     };
 
+    // keep list of devices we've seen so we don't connect multiple times...
     private final ScanCallback mLeScanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             Log.wtf(TAG, "Scan Result" + result.toString());
             BluetoothDevice device = result.getDevice();
-            //if ( device.getUuids().contains(UUID_GANGLION_SERVICE) )
-            if (device.getName() != null && device.getName().toUpperCase().contains(DEVICE_NAME_GANGLION)) {
-                // auto-connect to the  1st ganglion w find...
-                connect(device.getAddress());
+            if (knowDevices.containsKey(device)) {
+                // skip known devices
+                return;
+            }
+            // filter for devices we care about.
+            String devname = device.getName();
+            boolean validName = false;
+            if (devname != null){
+                for (String regexp : validNameRegexps) {
+                    if (devname.matches(regexp)) {
+                        validName = true;
+                        break;
+                    }
+                }
+            }
+            if ( validName ) {
+                // register this device as new device
+                knowDevices.put(device, BLESTATE.NEW);
+            } else {
+                knowDevices.put(device, BLESTATE.IGNORED);
             }
         }
     };
 
     void setupServicesAndNotifications(BluetoothGatt gatt) {
-        // request high connection priority so we don't drop too many samples
-        gatt.requestConnectionPriority(CONNECTION_PRIORITY_HIGH);
-
+        if( mBluetoothState != BLESTATE.DISCOVERED ) {
+            Log.v(TAG,"Warning: service setup when not discovered?");
+        }
         // register to notify on the data received characteristic
+        boolean keepconnection=false;
         for (BluetoothGattService gattService : gatt.getServices()) {
+            UUID gattServiceUUID = gattService.getUuid();
             // skip non ganglion services
-            if (!UUID_GANGLION_SERVICE.equals(gattService.getUuid()))
-                continue;
+            if (UUID_GANGLION_SERVICE.equals(gattServiceUUID)) {
+                // setup the rest of the services
+                onGanglionDiscovered(gatt, gattService);
+                keepconnection=true;
+            } else if (UUID_PRESENTATION_SERVICE.equals(gattServiceUUID)){
+                onPresentationDiscovered(gatt, gattService);
+                keepconnection=true;
+            } else if (UUID_SCOREOUTPUT_SERVICE.equals(gattServiceUUID)){
+                onScoreOutputDiscovered(gatt, gattService);
+                keepconnection=true;
+            }
+        }
+        if ( keepconnection == false ){
+            // disconnect from a device which has nothing of interest to us
+            gatt.disconnect();
+            knowDevices.put(gatt.getDevice(),BLESTATE.DISCONNECTED);
+            mBluetoothState = BLESTATE.IDLE;
+        }
+    }
 
-            // find the RECEIVE characteristic and register for change notifications
-            for (BluetoothGattCharacteristic gattCharacteristic : gattService.getCharacteristics()) {
-                UUID uuid = gattCharacteristic.getUuid();
-                //if this is the read attribute for Cyton/Ganglion, register for notify service
-                if (UUID_GANGLION_RECEIVE.equals(uuid)) {//the RECEIVE characteristic
-                    // cache this  charactersitic for later
-                    mGanglionReceive = gattCharacteristic;
-                } else if (UUID_GANGLION_SEND.equals(uuid)) {
-                    mGanglionSend = gattCharacteristic;
-                }
+    private void onScoreOutputDiscovered(BluetoothGatt gatt, BluetoothGattService gattService) {
+        if ( mScoreOutputBluetoothGatt == gatt ){
+            Log.v(TAG,"Got scan result for device already connected to!");
+            return;
+        }
+        if ( mScoreOutputBluetoothGatt != null ){
+            Log.v(TAG,"Already connected to score output module!");
+            mScoreOutputBluetoothGatt.disconnect();
+        }
+        // register as device we're connected to
+        mScoreOutputBluetoothGatt=gatt;
+        // find the RECEIVE characteristic and register for change notifications
+        for (BluetoothGattCharacteristic gattCharacteristic : gattService.getCharacteristics()) {
+            UUID uuid = gattCharacteristic.getUuid();
+            if (UUID_SCOREOUTPUT_OUTPUTSCORE.equals(uuid)) {
+                // register for notifications on this characteristic
+                setCharacteristicNotification(gatt, gattCharacteristic,true);
             }
         }
     }
+
+    private void onPresentationDiscovered(BluetoothGatt gatt, BluetoothGattService gattService) {
+        // TODO: check if already connected!
+
+        // register as device we're connected to
+        mPresentationBluetoothGatt.add(gatt);
+        // find the RECEIVE characteristic and register for change notifications
+        for (BluetoothGattCharacteristic gattCharacteristic : gattService.getCharacteristics()) {
+            UUID uuid = gattCharacteristic.getUuid();
+            //if this is the read attribute for Cyton/Ganglion, register for notify service
+            if (UUID_PRESENTATION_STIMULUSSTATE.equals(uuid)) {
+                setCharacteristicNotification(gatt, gattCharacteristic, true);
+            }
+        }
+    }
+
+    void onGanglionDiscovered(BluetoothGatt gatt, BluetoothGattService gattService){
+        if ( mGanglionBluetoothGatt == gatt ){
+            Log.v(TAG,"Got scan result for device already connected to!");
+            return;
+        }
+        if ( mGanglionBluetoothGatt != null ){
+            Log.v(TAG,"Already connected to score output module!");
+            mGanglionBluetoothGatt.disconnect();
+        }
+        mGanglionBluetoothGatt = gatt;
+        mGanglionBluetoothDeviceAddress = gatt.getDevice().getName() + " (" + gatt.getDevice().getAddress() +")";
+
+        // request high connection priority so we don't drop too many samples
+        if ( mBluetoothState != BLESTATE.DISCOVERED ){
+            Log.v(TAG,"Warning: trying to setup ganglion when not in discovered state");
+        }
+        mBluetoothState = BLESTATE.WRITING;
+        gatt.requestConnectionPriority(CONNECTION_PRIORITY_HIGH);
+        mGanglionConnectionState = GANGLIONSTATE.REGISTERING;
+
+        // find the RECEIVE characteristic and register for change notifications
+        for (BluetoothGattCharacteristic gattCharacteristic : gattService.getCharacteristics()) {
+            UUID uuid = gattCharacteristic.getUuid();
+            if (UUID_GANGLION_RECEIVE.equals(uuid)) {
+                // setup to get notify on this characteristic
+                setCharacteristicNotification(gatt, gattCharacteristic, true);
+            }
+        }
+
+
+        // stop scanning when got a good match
+        if (mGanglionConnectionState == GANGLIONSTATE.SCANNING) {
+            Log.v(TAG, "Stopping scanning");
+            mBluetoothLeScanner.stopScan(mLeScanCallback);
+            mBluetoothLeScanner.flushPendingScanResults(mLeScanCallback);
+        }
+    }
+
+    private void onScoreOutputRegistered() {
+        // post score output registered.
+    }
+
+    private void onPresentationRegistered() {
+        // post registration work? write enabled?
+    }
+
+    private void onGanglionRegistered() {
+        // setup the rest of the services
+        mGanglionConnectionState = GANGLIONSTATE.REGISTERED;
+        sendData(true);
+    }
+
+
 
     //------------------------ BLE connection management....
 
@@ -255,16 +468,180 @@ public class GanglionAndroidBluetooth implements Runnable {
         }
         mBluetoothLeScanner = mBluetoothAdapter.getBluetoothLeScanner();
 
-        mConnectionState = STATE_SCANNING;
+        mGanglionConnectionState = GANGLIONSTATE.SCANNING;
         //mBluetoothLeScanner.startScan( mLeScanCallback );
         // scan only for ganglions & connect to first one  we  find.
         ScanFilter.Builder sfb = new ScanFilter.Builder();
         //sfb.setServiceUuid(new ParcelUuid(UUID_GANGLION_SERVICE));
         ScanSettings.Builder ssb = new ScanSettings.Builder();
-        ssb.setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY);//SCAN_MODE_BALANCED);
+        ssb.setScanMode(ScanSettings.SCAN_MODE_BALANCED);//SCAN_MODE_LOW_LATENCY);//
         ssb.setReportDelay(0);
-        mBluetoothLeScanner.startScan(Collections.singletonList(sfb.build()), ssb.build(), mLeScanCallback); //TODO[] : yes this is deprecated
+        mBluetoothLeScanner.startScan(Collections.singletonList(sfb.build()), ssb.build(), mLeScanCallback);
         return true;
+    }
+
+
+    private BluetoothGattService createService() {
+        BluetoothGattService service = new BluetoothGattService(UUID_DECODER_SERVICE, SERVICE_TYPE_PRIMARY);
+
+        // PredictedTargetProbability characteristic (read-only, supports subscriptions)
+        BluetoothGattCharacteristic ptp = new BluetoothGattCharacteristic(UUID_DECODER_PREDICTEDTARGETPROB, PROPERTY_READ | PROPERTY_NOTIFY, PERMISSION_READ);
+        BluetoothGattDescriptor ptpConfig = new BluetoothGattDescriptor(UUID_CLIENT_CHARACTERISTIC_CONFIG, PERMISSION_READ | PERMISSION_WRITE);
+        ptp.addDescriptor(ptpConfig);
+        service.addCharacteristic(ptp);
+
+        // PredictedTargetProbability characteristic (read-only, supports subscriptions)
+        BluetoothGattCharacteristic ptd = new BluetoothGattCharacteristic(UUID_DECODER_PREDICTEDTARGETDIST, PROPERTY_READ | PROPERTY_NOTIFY, PERMISSION_READ);
+        BluetoothGattDescriptor ptdConfig = new BluetoothGattDescriptor(UUID_CLIENT_CHARACTERISTIC_CONFIG, PERMISSION_READ | PERMISSION_WRITE);
+        ptd.addDescriptor(ptdConfig);
+        service.addCharacteristic(ptd);
+
+        // Selection characteristic (read-only, supports subscriptions)
+        BluetoothGattCharacteristic sel = new BluetoothGattCharacteristic(UUID_DECODER_SELECTION, PROPERTY_READ | PROPERTY_NOTIFY | PROPERTY_WRITE, PERMISSION_READ);
+        BluetoothGattDescriptor selConfig = new BluetoothGattDescriptor(UUID_CLIENT_CHARACTERISTIC_CONFIG, PERMISSION_READ | PERMISSION_WRITE);
+        sel.addDescriptor(selConfig);
+        service.addCharacteristic(sel);
+
+        return service;
+    }
+
+
+    private boolean initServices() {
+        if (mBluetoothAdapter == null) {
+            Log.w(TAG, "BluetoothAdapter not initialized.");
+            return false;
+        }
+
+        mBluetoothGattServer = mBluetoothManager.openGattServer(mContext, mGattServerCallback);
+        mBluetoothGattServer.addService(createService());
+
+        // Advertise that we provide a DECODER service!
+        AdvertiseSettings settings = new AdvertiseSettings.Builder()
+                .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_BALANCED)
+                .setConnectable(true)
+                .setTimeout(0)
+                .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_MEDIUM)
+                .build();
+        AdvertiseData data = new AdvertiseData.Builder()
+                .setIncludeDeviceName(false)
+                .setIncludeTxPowerLevel(false)
+                .addServiceUuid(new ParcelUuid(UUID_DECODER_SERVICE))
+                .build();
+        // Starts advertising.
+        mBluetoothLeAdvertiser = mBluetoothAdapter.getBluetoothLeAdvertiser();
+        mBluetoothLeAdvertiser.startAdvertising(settings, data, mAdvertiseCallback);
+
+        return true;
+    }
+
+    private AdvertiseCallback mAdvertiseCallback = new AdvertiseCallback() {
+        @Override
+        public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+            Log.i(TAG, "LE Advertise Started.");
+        }
+
+        @Override
+        public void onStartFailure(int errorCode) {
+            Log.w(TAG, "LE Advertise Failed: " + errorCode);
+        }
+    };
+
+    private final BluetoothGattServerCallback mGattServerCallback = new BluetoothGattServerCallback() {
+
+        // respond to read request
+        @Override
+        public void onCharacteristicReadRequest(BluetoothDevice device,
+                                                int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+            super.onCharacteristicReadRequest(device,requestId,offset,characteristic);
+            if (UUID_DECODER_PREDICTEDTARGETDIST.equals(characteristic.getUuid())) {
+                mPredictedTargetDist.serialize(tmp);
+                mBluetoothGattServer.sendResponse(device, requestId, GATT_SUCCESS, tmp.position(), tmp.array());
+            } else if (UUID_DECODER_PREDICTEDTARGETPROB.equals(characteristic.getUuid())) {
+                mPredictedTargetProb.serialize(tmp);
+                mBluetoothGattServer.sendResponse(device, requestId, GATT_SUCCESS, tmp.position(), tmp.array());
+            } else if (UUID_DECODER_SELECTION.equals(characteristic.getUuid())) {
+                mBluetoothGattServer.sendResponse(device, requestId, GATT_SUCCESS, 0, new byte[]{(byte)mSelection.objID});
+            }
+        }
+
+        @Override
+        public void onCharacteristicWriteRequest(BluetoothDevice device, int requestId, BluetoothGattCharacteristic characteristic, boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+            super.onCharacteristicWriteRequest(device, requestId, characteristic, preparedWrite, responseNeeded, offset, value);
+            if (UUID_DECODER_SELECTION.equals(characteristic.getUuid())) {
+                mSelection.objID = characteristic.getIntValue(FORMAT_UINT8,0);
+                onSelectionWrite();
+            }
+        }
+
+        // reply to notification request
+        @Override
+        public void onDescriptorWriteRequest(BluetoothDevice device,
+                                             int requestId, BluetoothGattDescriptor descriptor,
+                                             boolean preparedWrite, boolean responseNeeded, int offset, byte[] value) {
+            // Q: how does it work when register on one characteristic but not others?
+            if (UUID_CLIENT_CHARACTERISTIC_CONFIG.equals(descriptor.getUuid())) {
+                if (Arrays.equals(ENABLE_NOTIFICATION_VALUE, value)) {
+                    mRegisteredDecoderDevices.add(device);
+                } else if (Arrays.equals(DISABLE_NOTIFICATION_VALUE, value)) {
+                    mRegisteredDecoderDevices.remove(device);
+                }
+                if (responseNeeded) {
+                    mBluetoothGattServer.sendResponse(device, requestId, GATT_SUCCESS, 0, null);
+                }
+            }
+        }
+    };
+
+    private void notifyPredictedTargetProb(PredictedTargetProb ptp) {
+        BluetoothGattCharacteristic characteristic = mBluetoothGattServer
+                .getService(UUID_DECODER_SERVICE)
+                .getCharacteristic(UUID_DECODER_PREDICTEDTARGETPROB);
+
+        ptp.serialize(tmp);
+        characteristic.setValue(tmp.array());
+        for (BluetoothDevice device : mRegisteredDecoderDevices) {
+            mBluetoothGattServer.notifyCharacteristicChanged(device, characteristic, false);
+        }
+        this.mPredictedTargetProb=ptp;
+    }
+
+    private void notifyPredictedTargetDist(PredictedTargetDist ptd) {
+        BluetoothGattCharacteristic characteristic = mBluetoothGattServer
+                .getService(UUID_DECODER_SERVICE)
+                .getCharacteristic(UUID_DECODER_PREDICTEDTARGETDIST);
+
+        // TODO[]: pack the distribution message over multiple BLE packets!
+        ptd.serialize(tmp);
+        characteristic.setValue(tmp.array());
+        for (BluetoothDevice device : mRegisteredDecoderDevices) {
+            mBluetoothGattServer.notifyCharacteristicChanged(device, characteristic, false);
+        }
+        this.mPredictedTargetDist=ptd;
+    }
+
+    private void notifySelection(Selection sel) {
+        BluetoothGattCharacteristic characteristic = mBluetoothGattServer
+                .getService(UUID_DECODER_SERVICE)
+                .getCharacteristic(UUID_DECODER_SELECTION);
+
+        characteristic.setValue(new byte[]{(byte)sel.objID});
+        for (BluetoothDevice device : mRegisteredDecoderDevices) {
+            mBluetoothGattServer.notifyCharacteristicChanged(device, characteristic, false);
+        }
+        mSelection=sel;
+    }
+
+    private void onSelectionWrite() {
+        // write a BLE selection to the rest of the system
+        if (utopiaClient == null || !utopiaClient.isConnected()) {
+            System.out.println("Warning: UtopiaClient isn't connected");
+            return;
+        }
+        try{
+            utopiaClient.sendMessage(mSelection);
+        } catch ( IOException ex ){
+            Log.v(TAG,"Error writing selection info");
+        }
     }
 
     /**
@@ -282,29 +659,6 @@ public class GanglionAndroidBluetooth implements Runnable {
             return false;
         }
 
-        // Previously connected device.  Try to reconnect.
-        if (address.equals(mBluetoothDeviceAddress)
-                && mBluetoothGatt != null) {
-            if (mConnectionState == STATE_CONNECTING) {
-                Log.d(TAG, "got new match while cnnectin... skipping");
-                return true;
-            }
-            Log.d(TAG, "Trying to use an existing mBluetoothGatt for connection.");
-            if (mBluetoothGatt.connect()) {
-                mConnectionState = STATE_CONNECTING;
-                return true;
-            } else {
-                return false;
-            }
-        }
-
-        // stop scanning when got a good match
-        if (mConnectionState == STATE_SCANNING) {
-            Log.v(TAG, "Stopping scanning");
-            mBluetoothLeScanner.stopScan(mLeScanCallback);
-            mBluetoothLeScanner.flushPendingScanResults(mLeScanCallback);
-        }
-
         final BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
         if (device == null) {
             Log.w(TAG, "Device not found.  Unable to connect.");
@@ -314,10 +668,12 @@ public class GanglionAndroidBluetooth implements Runnable {
         Log.v(TAG, "Connecting to GATT Server on the Device");
         // We want to directly connect to the device, so we are setting the autoConnect
         // parameter to false.
+        if ( mBluetoothState != BLESTATE.IDLE ){
+            Log.e(TAG,"Error: trying to connect when not idle");
+        }
+        mBluetoothState = BLESTATE.CONNECTING;
         mBluetoothGatt = device.connectGatt(this.mContext, false, mGattCallback, BluetoothDevice.TRANSPORT_LE);
         Log.d(TAG, "Trying to create a new connection.");
-        mBluetoothDeviceAddress = address;
-        mConnectionState = STATE_CONNECTING;
         return true;
     }
 
@@ -332,13 +688,14 @@ public class GanglionAndroidBluetooth implements Runnable {
     @Override
     public void run() {
         initialize(null);
+        initServices();
         scanAndAutoconnect();
         utopiaAutoConnect();
 
         boolean running=true;
         while (running) {
             try {
-                Thread.sleep(500);
+                Thread.sleep(100);
             } catch (InterruptedException ex) {
                 running=false;
             }
@@ -346,20 +703,30 @@ public class GanglionAndroidBluetooth implements Runnable {
                 running=false;
             }
 
-            if ( mConnectionState == STATE_DISCONNECTED){
-                scanAndAutoconnect();
-            }else if (mConnectionState == STATE_DISCOVERED) {
-                // discovered ganglion with right services.  Setup notify for data arrival
-                if (mGanglionReceive != null) {
-                    Log.v(TAG, "Registering notify for: " + mGanglionReceive.getUuid());
-                    setCharacteristicNotification(mGanglionReceive, true);
-                    mConnectionState = STATE_REGISTERING;
+            if ( mBluetoothState == BLESTATE.IDLE) {
+                // connect to new devices to check if they provide services we should know about
+                for ( BluetoothDevice d : knowDevices.keySet() ){
+                    if ( knowDevices.get(d) == BLESTATE.NEW) {
+                        connect(d.getAddress());
+                        break;
+                    }
                 }
-            } else if (mConnectionState == STATE_REGISTERED) {
-                // successfully setup for data arrival, send the start data-stream command
-                sendData(true);
-            } else if (mConnectionState == STATE_READING) {
-                // all is good...
+            }
+
+            // server notify on outputs from us.
+            try {
+                List<UtopiaMessage> msgs = utopiaClient.getNewMessages();
+                for ( UtopiaMessage msg : msgs ){
+                    if ( msg.msgID() == PredictedTargetProb.MSGID ){
+                        notifyPredictedTargetProb((PredictedTargetProb)msg);
+                    } else if ( msg.msgID() == PredictedTargetDist.MSGID ){
+                        notifyPredictedTargetDist((PredictedTargetDist)msg);
+                    } else if ( msg.msgID() == Selection.MSGID ){
+                        notifySelection((Selection)msg);
+                    }
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
             }
         }
         // shutdown cleanly?
@@ -367,30 +734,18 @@ public class GanglionAndroidBluetooth implements Runnable {
     }
 
     /**
-     * Disconnects an existing connection or cancel a pending connection. The disconnection result
-     * is reported asynchronously through the
-     * {@code BluetoothGattCallback#onConnectionStateChange(android.bluetooth.BluetoothGatt, int, int)}
-     * callback.
-     */
-    public void disconnect() {
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
-            Log.w(TAG, "BluetoothAdapter not initialized");
-            return;
-        }
-        mBluetoothGatt.disconnect();
-    }
-
-    /**
      * After using a given BLE device, the app must call this method to ensure resources are
      * released properly.
      */
     public void close() {
-        if (mBluetoothGatt == null) {
-            return;
-        }
-        mBluetoothGatt.disconnect();
-        mBluetoothGatt.close();
-        mBluetoothGatt = null;
+        // TODO[]: loop over all other devices!
+        mGanglionBluetoothGatt.disconnect();
+        mGanglionBluetoothGatt.close();
+        mGanglionBluetoothGatt = null;
+        mScoreOutputBluetoothGatt.disconnect();
+        mScoreOutputBluetoothGatt.close();
+        mBluetoothLeAdvertiser.stopAdvertising(mAdvertiseCallback);
+        mBluetoothGattServer.close();
     }
 
     /**
@@ -400,33 +755,21 @@ public class GanglionAndroidBluetooth implements Runnable {
      *
      * @param characteristic The characteristic to read from.
      */
-    public void readCharacteristic(BluetoothGattCharacteristic characteristic) {
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
-            Log.w(TAG, "BluetoothAdapter not initialized");
-            return;
-        }
-        mBluetoothGatt.readCharacteristic(characteristic);
-    }
-
-    public void onCharacteristicWrite(BluetoothGatt gatt,
-                                      BluetoothGattCharacteristic characteristic,
-                                      int status) {
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
-            Log.w(TAG, "BluetoothAdapter not initialized");
-            return;
-        }
-        Log.w(TAG, "Written to: " + characteristic.getUuid() + " Status: " + (BluetoothGatt.GATT_SUCCESS == status));
-    }
-
-    public void writeCharacteristic(BluetoothGattCharacteristic characteristic) {
+    public void writeCharacteristic(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic) {
         //pre-prepared characteristic to write to
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
+        if (mBluetoothAdapter == null || gatt == null) {
             Log.w(TAG, "BluetoothAdapter not initialized");
             return;
         }
         Log.w(TAG, "Writing to " + characteristic.getUuid());
 
-        mBluetoothGatt.writeCharacteristic(characteristic);
+        if ( mBluetoothState != BLESTATE.IDLE ){
+            Log.v(TAG, "Warning: switching state when not idle!");
+        }
+
+        knowDevices.put(gatt.getDevice(),BLESTATE.WRITING);
+        mBluetoothState = BLESTATE.WRITING;
+        gatt.writeCharacteristic(characteristic);
     }
 
     /**
@@ -435,29 +778,31 @@ public class GanglionAndroidBluetooth implements Runnable {
      * @param characteristic Characteristic to act on.
      * @param enabled        If true, enable notification.  False otherwise.
      */
-    public void setCharacteristicNotification(BluetoothGattCharacteristic characteristic,
+    public void setCharacteristicNotification(BluetoothGatt gatt,
+                                              BluetoothGattCharacteristic characteristic,
                                               boolean enabled) {
         Log.w(TAG, characteristic.getUuid() + " - Notify:" + enabled);
-        if (mBluetoothAdapter == null || mBluetoothGatt == null) {
+        if (mBluetoothAdapter == null || mGanglionBluetoothGatt == null) {
             Log.w(TAG, "BluetoothAdapter not initialized");
             return;
         }
         Log.v(TAG, "Set notify on");
-        mBluetoothGatt.setCharacteristicNotification(characteristic, enabled);
-
-        // This is specific Ganglion Receive data
-        if (UUID_GANGLION_RECEIVE.equals(characteristic.getUuid())) {
-            Log.v(TAG, "set descriptor");
-            BluetoothGattDescriptor descriptor =
-                    characteristic.getDescriptor(UUID_CLIENT_CHARACTERISTIC_CONFIG);
-            descriptor.setValue(BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE);
-            mBluetoothGatt.writeDescriptor(descriptor);
+        if ( mBluetoothState != BLESTATE.IDLE ){
+            Log.v(TAG, "Warning: switching state when not idle!");
         }
+        mBluetoothState = BLESTATE.WRITING;
+        knowDevices.put(gatt.getDevice(),BLESTATE.WRITING);
+        gatt.setCharacteristicNotification(characteristic, enabled);
+
+        Log.v(TAG, "set descriptor");
+        BluetoothGattDescriptor descriptor =
+               characteristic.getDescriptor(UUID_CLIENT_CHARACTERISTIC_CONFIG);
+        descriptor.setValue(ENABLE_NOTIFICATION_VALUE);
+        gatt.writeDescriptor(descriptor);
     }
 
-
-    public String getmBluetoothDeviceAddress() {
-        return mBluetoothDeviceAddress;
+    public String getmGanglionBluetoothDeviceAddress() {
+        return mGanglionBluetoothDeviceAddress;
     }
 
     // --------------------------  Connection to utopia
@@ -545,11 +890,10 @@ public class GanglionAndroidBluetooth implements Runnable {
             cmd = (char) mCommands[1];
         }
 
-        if (mGanglionSend != null) {
-            Log.v(TAG, "Sending Command : " + cmd);
-            mGanglionSend.setValue(new byte[]{(byte) cmd});
-            writeCharacteristic(mGanglionSend);
-        }
+        Log.v(TAG, "Sending Command : " + cmd);
+        BluetoothGattCharacteristic mGanglionSend = mGanglionBluetoothGatt.getService(UUID_GANGLION_SERVICE).getCharacteristic(UUID_GANGLION_SEND);
+        mGanglionSend.setValue(new byte[]{(byte) cmd});
+        writeCharacteristic(mGanglionBluetoothGatt, mGanglionSend);
     }
 
     public void toggleAccelerometer(boolean send) {
@@ -564,11 +908,10 @@ public class GanglionAndroidBluetooth implements Runnable {
             cmd = (char) mCommands[1];
         }
 
-        if (mGanglionSend != null) {
-            Log.v(TAG, "Sending Command : " + cmd);
-            mGanglionSend.setValue(new byte[]{(byte) cmd});
-            writeCharacteristic(mGanglionSend);
-        }
+        BluetoothGattCharacteristic mGanglionSend = mGanglionBluetoothGatt.getService(UUID_GANGLION_SERVICE).getCharacteristic(UUID_GANGLION_SEND);
+        Log.v(TAG, "Sending Command : " + cmd);
+        mGanglionSend.setValue(new byte[]{(byte) cmd});
+        writeCharacteristic(mGanglionBluetoothGatt, mGanglionSend);
     }
 
     public void impedanceCheck(boolean send) {
@@ -584,11 +927,34 @@ public class GanglionAndroidBluetooth implements Runnable {
         }
 
         Log.v(TAG, "Sending Command : " + cmd);
+        BluetoothGattCharacteristic mGanglionSend = mGanglionBluetoothGatt.getService(UUID_GANGLION_SERVICE).getCharacteristic(UUID_GANGLION_SEND);
         mGanglionSend.setValue(new byte[]{(byte) cmd});
-        writeCharacteristic(mGanglionSend);
+        writeCharacteristic(mGanglionBluetoothGatt, mGanglionSend);
     }
 
     // --------------------------------- Charastertic processing
+    private void actionOutputScoreAvailable(BluetoothGattCharacteristic characteristic) {
+        // TODO[]: send to the UtopiaHUB
+        final byte[] data = characteristic.getValue();
+        StringBuilder str = new StringBuilder();
+        for ( int i=0; i< data.length; i++ ) str.append(data[i]);
+        Log.v(TAG, "Got OutputScore: " + str.toString());
+    }
+
+    private void actionStimulusStateAvailable(BluetoothGattCharacteristic characteristic) {
+        // TODO[]: send to the UtopiaHUB
+        final byte[] data = characteristic.getValue();
+        StringBuilder str = new StringBuilder();
+        for ( int i=0; i< data.length; i++ ) str.append(data[i]);
+        Log.v(TAG, "Got StimulusState: " + str.toString());
+        try {
+            StimulusEvent ssmsg=new StimulusEvent(-1,0,0);
+            utopiaClient.sendMessage(ssmsg);
+        } catch ( IOException ex ){
+            Log.v(TAG,"Exception sending stimulus state message");
+        }
+    }
+
     private void actionDataAvailable(final BluetoothGattCharacteristic characteristic) {
         if (!UUID_GANGLION_RECEIVE.equals(characteristic.getUuid())) {
             return;

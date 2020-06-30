@@ -1,49 +1,36 @@
 package nl.ma.decoder;
 
 import android.app.Activity;
-import android.app.Service;
 import android.content.Context;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.os.Build;
 import android.os.Bundle;
 import android.os.CountDownTimer;
-import android.os.Environment;
-import android.support.annotation.RequiresApi;
 import android.util.AttributeSet;
 import android.util.Log;
-import android.view.Choreographer;
 import android.view.View;
-import android.view.Window;
 import android.widget.Button;
 import android.widget.TextView;
 
 
 import java.io.File;
-import java.io.IOException;
 import java.net.SocketException;
-import java.time.chrono.MinguoChronology;
 import java.util.Deque;
 import java.util.LinkedList;
 import java.util.List;
 
-import nl.ma.decoder.GanglionAndroidBluetooth;
 import nl.ma.utopiaserver.ServerUtopiaMessage;
 import nl.ma.utopiaserver.UtopiaServer;
 
-import nl.ma.decoder.ServiceMindaffectbci;
 import nl.ma.utopiaserver.messages.DataPacket;
 import nl.ma.utopiaserver.messages.SignalQuality;
 import nl.ma.utopiaserver.messages.UtopiaMessage;
 
 
 import android.net.wifi.WifiManager;
-import android.net.wifi.WifiManager.MulticastLock;
-
-import org.w3c.dom.Text;
 
 public class BootActivity extends Activity {
 
@@ -173,7 +160,7 @@ public class BootActivity extends Activity {
     }
 
     private void chartUpdateTick() {
-        device_ID.setText(gab.getmBluetoothDeviceAddress());
+        device_ID.setText(gab.getmGanglionBluetoothDeviceAddress());
 
         List<ServerUtopiaMessage> newmsgs = utopiaServer.popMessages();
         for (ServerUtopiaMessage svrmsg : newmsgs) {
