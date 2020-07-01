@@ -43,6 +43,7 @@ import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.ParcelUuid;
@@ -401,12 +402,18 @@ public class GanglionAndroidBluetooth implements Runnable {
         }
 
 
-        // stop scanning when got a good match
-        if (mGanglionConnectionState == GANGLIONSTATE.SCANNING) {
-            Log.v(TAG, "Stopping scanning");
-            mBluetoothLeScanner.stopScan(mLeScanCallback);
-            mBluetoothLeScanner.flushPendingScanResults(mLeScanCallback);
-        }
+        // stop scanning when got the ganglion..
+        // reset to less intense scanning mode -- to free up the BLE stack.
+
+        Log.v(TAG, "Stopping scanning");
+        mBluetoothLeScanner.stopScan(mLeScanCallback);
+        mBluetoothLeScanner.flushPendingScanResults(mLeScanCallback);
+        ScanFilter.Builder sfb = new ScanFilter.Builder();
+        ScanSettings.Builder ssb = new ScanSettings.Builder();
+        ssb.setScanMode(ScanSettings.SCAN_MODE_OPPORTUNISTIC);
+        ssb.setReportDelay(0);
+        mBluetoothLeScanner.startScan(null, ssb.build(), mLeScanCallback);
+
     }
 
     private void onScoreOutputRegistered() {
@@ -436,6 +443,9 @@ public class GanglionAndroidBluetooth implements Runnable {
         mContext = ctx;
     }
 
+    public boolean initialize() {
+        return initialize(null);
+    }
     public boolean initialize(Activity activity) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (activity != null && mContext.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_DENIED) {
@@ -443,7 +453,7 @@ public class GanglionAndroidBluetooth implements Runnable {
             }
         }
 
-        // For API level 18 and above, get a reference to BluetoothAdapter through
+            // For API level 18 and above, get a reference to BluetoothAdapter through
         // BluetoothManager.
         if (mBluetoothManager == null) {
             mBluetoothManager = (BluetoothManager) mContext.getSystemService(Context.BLUETOOTH_SERVICE);
@@ -458,6 +468,13 @@ public class GanglionAndroidBluetooth implements Runnable {
             Log.e(TAG, "Unable to obtain a BluetoothAdapter.");
             return false;
         }
+
+        if (!mBluetoothAdapter.isEnabled()) {
+            Log.v(TAG, "Enabling BLE adapter");
+            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+            mContext.startActivity(enableBtIntent);//, REQUEST_ENABLE_BT);
+        }
+
         return true;
     }
 
@@ -467,6 +484,10 @@ public class GanglionAndroidBluetooth implements Runnable {
             return false;
         }
         mBluetoothLeScanner = mBluetoothAdapter.getBluetoothLeScanner();
+        if (mBluetoothLeScanner == null) {
+            Log.w(TAG, "BluetoothScanner not initialized.");
+            return false;
+        }
 
         mGanglionConnectionState = GANGLIONSTATE.SCANNING;
         //mBluetoothLeScanner.startScan( mLeScanCallback );
@@ -474,7 +495,7 @@ public class GanglionAndroidBluetooth implements Runnable {
         ScanFilter.Builder sfb = new ScanFilter.Builder();
         //sfb.setServiceUuid(new ParcelUuid(UUID_GANGLION_SERVICE));
         ScanSettings.Builder ssb = new ScanSettings.Builder();
-        ssb.setScanMode(ScanSettings.SCAN_MODE_BALANCED);//SCAN_MODE_LOW_LATENCY);//
+        ssb.setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY);//SCAN_MODE_BALANCED);//
         ssb.setReportDelay(0);
         mBluetoothLeScanner.startScan(Collections.singletonList(sfb.build()), ssb.build(), mLeScanCallback);
         return true;
@@ -513,7 +534,16 @@ public class GanglionAndroidBluetooth implements Runnable {
         }
 
         mBluetoothGattServer = mBluetoothManager.openGattServer(mContext, mGattServerCallback);
-        mBluetoothGattServer.addService(createService());
+        if ( mBluetoothGattServer == null ) {
+            Log.e(TAG,"Couldn't allocate a BLE gatt server!");
+            return false;
+        }
+        BluetoothGattService magattservice = createService();
+        if( magattservice == null ) {
+            Log.e(TAG,"Couldn't create the gatt service!");
+            return false;
+        }
+        mBluetoothGattServer.addService(magattservice);
 
         // Advertise that we provide a DECODER service!
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
@@ -585,7 +615,7 @@ public class GanglionAndroidBluetooth implements Runnable {
                 } else if (Arrays.equals(DISABLE_NOTIFICATION_VALUE, value)) {
                     mRegisteredDecoderDevices.remove(device);
                 }
-                if (responseNeeded) {
+                if (responseNeeded && mBluetoothGattServer != null ) {
                     mBluetoothGattServer.sendResponse(device, requestId, GATT_SUCCESS, 0, null);
                 }
             }
@@ -593,6 +623,7 @@ public class GanglionAndroidBluetooth implements Runnable {
     };
 
     private void notifyPredictedTargetProb(PredictedTargetProb ptp) {
+        if ( mBluetoothGattServer == null ) return;
         BluetoothGattCharacteristic characteristic = mBluetoothGattServer
                 .getService(UUID_DECODER_SERVICE)
                 .getCharacteristic(UUID_DECODER_PREDICTEDTARGETPROB);

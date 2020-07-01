@@ -58,10 +58,8 @@ public class BootActivity extends Activity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.acitivity_main);
 
-
-
         /* Turn off multicast filter */
-        WifiManager wifi = (WifiManager) getSystemService(WIFI_SERVICE);
+        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
         if (wifi != null) {
             multicastlock = wifi.createMulticastLock("gab_multicastlock");
             multicastlock.acquire();
@@ -70,9 +68,8 @@ public class BootActivity extends Activity {
         //Window window = getWindow();
         //window.addOnFrameMetricsAvailableListener();
 
-        // TODO []: move this to a service?
+        // TODO []: move this to a service? and bind to it from all client apps?
         // TODO [x]: tell it where to save the logs...
-
         if (utopiaServer == null) {
             File external = getExternalFilesDir(null);
             String dataFile = null;
@@ -205,13 +202,16 @@ public class BootActivity extends Activity {
             dataringbuffer.removeFirst();
         }
 
-        nsample = nsample + msg.nsamples;
-        float elapsed = (t - dataTrackingStart) / 1000.0f;
-        text_state.setText(String.format("%d / %5.3fs = %5.3fHz", nsample, elapsed, nsample / elapsed));
-
-        // pre-compute number samples in buffer
+        // get number samples in the buffer and timerange it applies to
         int nsamples=0;
         for ( DataPacket dp : dataringbuffer ) nsamples += dp.nsamples;
+        int duration_ms = (dataringbuffer.peekLast().timeStamp - dataringbuffer.peekFirst().timeStamp);
+
+        nsample = nsample + msg.nsamples;
+        float elapsed = (t - dataTrackingStart) / 1000.0f;
+        text_state.setText(String.format("%d / %5.3fs = %5.3fHz", nsample, elapsed, nsamples * 1000.0f / duration_ms));
+
+        // pre-compute number samples in buffer
         float [] vals = new float[nsamples];
         int chi=0;
         for ( LineView chplt : chLineView ){
@@ -298,7 +298,7 @@ public class BootActivity extends Activity {
                     while (addrs.hasMoreElements()) {
                         java.net.InetAddress tmp = addrs.nextElement();
                         if (tmp instanceof java.net.Inet4Address) {
-                            hostIDs.append(", " + tmp);
+                            hostIDs.append("\n" + tmp);
                         }
                     }
                 }

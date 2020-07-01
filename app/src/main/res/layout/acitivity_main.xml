@@ -14,11 +14,11 @@
 
         <TextView
             android:id="@+id/label_host_ip"
-            android:layout_width="67dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
-            android:paddingRight="0dp"
+            android:paddingRight="10dp"
             android:paddingBottom="0dp"
             android:text="Host IP: "
             android:textColor="#000000"
@@ -36,7 +36,7 @@
             android:paddingBottom="0dp"
             android:text="-"
             android:textColor="#000000"
-            android:textSize="24sp" />
+            android:textSize="14sp" />
 
         <Space
             android:layout_width="15dp"
@@ -44,11 +44,11 @@
 
         <TextView
             android:id="@+id/text__device_ID"
-            android:layout_width="109dp"
+            android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
-            android:paddingRight="0dp"
+            android:paddingRight="10dp"
             android:paddingBottom="0dp"
             android:text="Ganglion MAC:"
             android:textColor="#000000"
@@ -66,7 +66,7 @@
             android:paddingBottom="0dp"
             android:text="-"
             android:textColor="#000000"
-            android:textSize="24sp" />
+            android:textSize="14sp" />
 
     </LinearLayout>
 
