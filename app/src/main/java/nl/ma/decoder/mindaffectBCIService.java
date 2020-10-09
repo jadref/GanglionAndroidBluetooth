@@ -11,6 +11,8 @@ import android.os.IBinder;
 import android.support.annotation.Nullable;
 import android.util.Log;
 
+import org.kivy.android.PythonService;
+
 import java.io.File;
 
 import nl.ma.utopiaserver.UtopiaServer;
@@ -28,6 +30,7 @@ public class mindaffectBCIService extends Service {
     Thread ganglionThread = null;
     Thread decoderThread = null;
     WifiManager.MulticastLock multicastlock;
+
 
     @Override
     public void onCreate() {
@@ -79,18 +82,21 @@ public class mindaffectBCIService extends Service {
         PendingIntent pendingIntent =
                 PendingIntent.getActivity(this, 0, notificationIntent, 0);
         Notification notification =
-                new Notification.Builder(this, NotificationChannel.DEFAULT_CHANNEL_ID)
-                        .setContentTitle(getText(R.string.notification_title))
-                        .setContentText(getText(R.string.notification_message))
-                        .setSmallIcon(R.drawable.icon)
-                        .setContentIntent(pendingIntent)
-                        .setTicker(getText(R.string.ticker_text))
-                        .build();
+                null;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            notification = new Notification.Builder(this, NotificationChannel.DEFAULT_CHANNEL_ID)
+                    .setContentTitle(getText(R.string.notification_title))
+                    .setContentText(getText(R.string.notification_message))
+                    .setSmallIcon(R.drawable.icon)
+                    .setContentIntent(pendingIntent)
+                    .setTicker(getText(R.string.ticker_text))
+                    .build();
+        }
         startForeground(ONGOING_NOTIFICATION_ID, notification);
 
         // The service is being created
         /* Turn off multicast filter */
-        WifiManager wifi = (WifiManager) getSystemService(WIFI_SERVICE);
+        WifiManager wifi = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
         if (wifi != null) {
             multicastlock = wifi.createMulticastLock("gab_multicastlock");
             multicastlock.acquire();
@@ -120,8 +126,16 @@ public class mindaffectBCIService extends Service {
         }
 
         // TODO [x]: start the decoder service..
-        ServiceMindaffectbci.prepare(this.getApplication().getApplicationContext());
-        ServiceMindaffectbci.start(this.getApplication().getApplicationContext(), "");
+        // manual call to the python service
+        if ( decoderThread == null){
+            ServiceMindaffectbci decoder = new ServiceMindaffectbci();
+            decoder.prepare(this.getApplication().getApplicationContext());
+            //ServiceMindaffectbci.start(this.getApplication().getApplicationContext(), "");
+            decoderThread = new Thread(decoder);
+            decoderThread.start();
+        }
+
+
     }
 
 }

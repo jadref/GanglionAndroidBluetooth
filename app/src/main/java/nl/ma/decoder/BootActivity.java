@@ -2,6 +2,7 @@ package nl.ma.decoder;
 
 import android.app.Activity;
 import android.content.Context;
+import android.content.Intent;
 import android.content.res.ColorStateList;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -31,6 +32,10 @@ import nl.ma.utopiaserver.messages.UtopiaMessage;
 
 
 import android.net.wifi.WifiManager;
+
+import org.kivy.android.PythonService;
+
+import static nl.ma.decoder.ServiceMindaffectbci.getAppRoot;
 
 public class BootActivity extends Activity {
 
@@ -63,6 +68,7 @@ public class BootActivity extends Activity {
         if (wifi != null) {
             multicastlock = wifi.createMulticastLock("gab_multicastlock");
             multicastlock.acquire();
+            Log.v(TAG,"Got the multicast lock");
         }
 
         //Window window = getWindow();
@@ -89,8 +95,19 @@ public class BootActivity extends Activity {
         }
 
         // TODO [x]: start the decoder service..
-        ServiceMindaffectbci.prepare(this.getApplication().getApplicationContext());
-        ServiceMindaffectbci.start(this.getApplication().getApplicationContext(), "");
+        // manual call to the python service
+        if ( decoderThread == null){
+            ServiceMindaffectbci decoder = new ServiceMindaffectbci();
+            decoder.prepare(this.getApplication().getApplicationContext());
+
+            // make an intent to setup the thread..
+            String appRoot = getAppRoot(this.getApplication().getApplicationContext());
+            decoder.setupCommand(this.getFilesDir().getAbsolutePath(), this.getApplicationInfo().nativeLibraryDir, appRoot, appRoot,"service.py","mindaffectBCI",appRoot,appRoot + ":" + appRoot + "/lib","");
+            decoderThread = new Thread(decoder,"decoder");
+            decoderThread.start();
+        }
+        //ServiceMindaffectbci.prepare(this.getApplication().getApplicationContext());
+        //ServiceMindaffectbci.start(this.getApplication().getApplicationContext(), "");
 
         // setup the links to the channel button and plots
         chBut.add((Button) findViewById(R.id.button));

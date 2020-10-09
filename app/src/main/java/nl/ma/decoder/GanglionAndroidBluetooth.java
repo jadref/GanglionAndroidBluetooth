@@ -50,6 +50,8 @@ import android.os.ParcelUuid;
 import android.util.Log;
 
 import java.io.IOException;
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.nio.ByteBuffer;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -73,12 +75,15 @@ import static android.bluetooth.BluetoothGattDescriptor.PERMISSION_WRITE;
 import static android.bluetooth.BluetoothGattService.SERVICE_TYPE_PRIMARY;
 import static android.support.v4.app.ActivityCompat.requestPermissions;
 
+import nl.ma.utopiaserver.ClientException;
 import nl.ma.utopiaserver.UtopiaClient;
 import nl.ma.utopiaserver.messages.DataPacket;
 import nl.ma.utopiaserver.messages.PredictedTargetDist;
 import nl.ma.utopiaserver.messages.PredictedTargetProb;
+import nl.ma.utopiaserver.messages.RawMessage;
 import nl.ma.utopiaserver.messages.Selection;
 import nl.ma.utopiaserver.messages.StimulusEvent;
+import nl.ma.utopiaserver.messages.OutputScore;
 import nl.ma.utopiaserver.messages.UtopiaMessage;
 
 public class GanglionAndroidBluetooth implements Runnable {
@@ -769,12 +774,21 @@ public class GanglionAndroidBluetooth implements Runnable {
      * released properly.
      */
     public void close() {
-        // TODO[]: loop over all other devices!
         mGanglionBluetoothGatt.disconnect();
         mGanglionBluetoothGatt.close();
         mGanglionBluetoothGatt = null;
-        mScoreOutputBluetoothGatt.disconnect();
-        mScoreOutputBluetoothGatt.close();
+        if ( mScoreOutputBluetoothGatt != null ) {
+            mScoreOutputBluetoothGatt.disconnect();
+            mScoreOutputBluetoothGatt.close();
+        }
+        for ( BluetoothGatt gatt : mPresentationBluetoothGatt ){
+            gatt.disconnect();
+            gatt.close();
+        }
+        for ( BluetoothGatt gatt : mOutputBluetoothGatt ){
+            gatt.disconnect();
+            gatt.close();
+        }
         mBluetoothLeAdvertiser.stopAdvertising(mAdvertiseCallback);
         mBluetoothGattServer.close();
     }
@@ -968,19 +982,38 @@ public class GanglionAndroidBluetooth implements Runnable {
         // TODO[]: send to the UtopiaHUB
         final byte[] data = characteristic.getValue();
         StringBuilder str = new StringBuilder();
-        for ( int i=0; i< data.length; i++ ) str.append(data[i]);
+        for ( int i = 0; i < data.length; i++ ) str.append(data[i]);
         Log.v(TAG, "Got OutputScore: " + str.toString());
+
+        try {
+            try {
+                UtopiaMessage msg = RawMessage.deserialize(ByteBuffer.wrap(data)).decodePayload();
+                utopiaClient.sendMessage(msg);
+            } catch (ClientException e) {
+                e.printStackTrace();
+                StringWriter sw = new StringWriter();
+                e.printStackTrace(new PrintWriter(sw));
+                String exceptionAsString = sw.toString();
+                utopiaClient.sendMessage(new nl.ma.utopiaserver.messages.Log(utopiaClient.gettimeStamp(),"Payload decoding error: "+sw.toString()));
+            }
+            StringBuilder sb = new StringBuilder(); for(byte b: data) sb.append(String.format("%02x", b));
+            utopiaClient.sendMessage(new nl.ma.utopiaserver.messages.Log(utopiaClient.gettimeStamp(),"OutputScore: 0x"+sb.toString()));
+        } catch ( IOException ex ){
+            Log.v(TAG,"Exception sending stimulus state message");
+        }
     }
 
     private void actionStimulusStateAvailable(BluetoothGattCharacteristic characteristic) {
-        // TODO[]: send to the UtopiaHUB
+        // TODO[X]: send to the UtopiaHUB
         final byte[] data = characteristic.getValue();
         StringBuilder str = new StringBuilder();
         for ( int i=0; i< data.length; i++ ) str.append(data[i]);
         Log.v(TAG, "Got StimulusState: " + str.toString());
         try {
-            StimulusEvent ssmsg=new StimulusEvent(-1,0,0);
-            utopiaClient.sendMessage(ssmsg);
+            UtopiaMessage msg = RawMessage.deserialize(ByteBuffer.wrap(data)).decodePayload();
+            utopiaClient.sendMessage(msg);
+        } catch (ClientException e) {
+            Log.v(TAG,"error decoding stimulus event payload");
         } catch ( IOException ex ){
             Log.v(TAG,"Exception sending stimulus state message");
         }

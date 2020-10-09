@@ -2,20 +2,22 @@
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_gravity="center"
     android:orientation="vertical"
     android:weightSum="1">
 
     <LinearLayout
         android:layout_width="match_parent"
-        android:layout_height="wrap_content"
+        android:layout_height="10mm"
         android:orientation="horizontal"
         android:weightSum="1">
 
         <TextView
             android:id="@+id/label_host_ip"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight=".1"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
             android:paddingRight="10dp"
@@ -26,9 +28,10 @@
 
         <TextView
             android:id="@+id/text_host_ip"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_weight=".5"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight=".35"
+            android:autoSizeTextType="uniform"
             android:gravity="end"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
@@ -39,13 +42,15 @@
             android:textSize="14sp" />
 
         <Space
-            android:layout_width="15dp"
-            android:layout_height="match_parent" />
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight=".1" />
 
         <TextView
             android:id="@+id/text__device_ID"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight=".1"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
             android:paddingRight="10dp"
@@ -56,9 +61,10 @@
 
         <TextView
             android:id="@+id/text_ID"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_weight=".5"
+            android:layout_width="0dp"
+            android:layout_height="match_parent"
+            android:layout_weight=".35"
+            android:autoSizeTextType="uniform"
             android:gravity="end"
             android:paddingLeft="0dp"
             android:paddingTop="0dp"
